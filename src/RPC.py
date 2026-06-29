@@ -25,7 +25,7 @@ APP_ID = "1159891020956323923" # Regular title
 APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title
 
 # Location to studio
-username = Path.home().name # Fetch local username
+username = Path.home().name # Fetch local username, originally it was steamuser but that was long time ago.
 # Log path
 LOG_DIR = os.path.expanduser(
     f"~/.var/app/org.vinegarhq.Vinegar/data/vinegar/prefixes/studio/"
