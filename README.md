@@ -1,5 +1,5 @@
 > [!WARNING]
-> This is pending, do not install yet.
+> This is pending, do not install yet. Once this is complete, this warning will be removed.
 
 # RPC for [Vinegar](https://github.com/vinegarhq/vinegar)
 Since the Rich presence of Vinegar does not work for me, i have made this workaround for myself and decided to make it public if anybody else wishes to use it for now.
