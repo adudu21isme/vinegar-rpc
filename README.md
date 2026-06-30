@@ -52,7 +52,7 @@ and set **Program** to the location of `launch_studio.sh`.
 
 ## How to uninstall once fully installed?
 1. Ensure Vinegar and all Roblox Studio instances are completely closed.
-2. Open `launch_studio.sh` and copy everything after `/usr/bin/flatpak`. For example:
+2. Open `launch_studio.sh` and copy everything after `/usr/bin/flatpak`. For example in:
 ```
 exec /usr/bin/flatpak run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
