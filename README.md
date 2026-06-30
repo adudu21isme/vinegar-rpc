@@ -12,7 +12,7 @@ If Vinegar fully fixes their RPC and has all the statues in this, then this repo
 > You may also right click on Vinegar in application menu and click "Edit Application":
 > <img width="1008" height="419" alt="image" src="https://github.com/user-attachments/assets/556e6945-cbd2-4068-a0cb-8753aa4983bc" />
 
-3. Download [launch_studio.sh](https://github.com/adudu21isme/vinegar-rpc-for-kde-plasma/blob/main/src/launch_studio.sh) and ideally save it to your `~/Documents` folder
+3. Download [launch_studio.sh](src/launch_studio.sh) and ideally save it to your `~/Documents` folder
 4. Open `launch studio.sh` in a program that permits you to edft .sh files like Kate, then replace:
 ```bash
 /usr/bin/flatpak run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
@@ -27,7 +27,7 @@ And change Program to the location of the `launch_studio.sh` script
 <img width="1334" height="429" alt="image" src="https://github.com/user-attachments/assets/929a74ec-1392-42ca-a08b-eae023c4e2cc" />, which you can find via Dolphin:
 <img width="864" height="665" alt="image" src="https://github.com/user-attachments/assets/de07aee1-3027-45e0-a65c-1cb669c762a1" />
 
-5. Download [RPC.py](https://github.com/adudu21isme/vinegar-rpc-for-kde-plasma/blob/main/src/RPC.py) and save it to your `~/Documents` folder
+5. Download [RPC.py](src/RPC.py) and save it to your `~/Documents` folder
 > [!NOTE]
 > If it is not in your documents folder then you will have to edit this in `launch.studio.sh`:
 > ```bash
