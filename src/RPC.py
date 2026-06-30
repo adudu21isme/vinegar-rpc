@@ -182,7 +182,7 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         universe_req = urllib.request.Request(
             f"https://apis.roblox.com/universes/v1/places/{place_id}/universe",
             headers={
-            "User-Agent": r"VinegarRPCKDEPlasmaUser-\https://github.com/adudu21isme/vinegar-rpc"
+            "User-Agent": r"VinegarRPCUser-\https://github.com/adudu21isme/vinegar-rpc"
             }
         )
 
@@ -194,7 +194,7 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         game_req = urllib.request.Request(
             f"https://games.roblox.com/v1/games?universeIds={universe_id}",
             headers={
-            "User-Agent": r"VinegarRPCKDEPlasmaUser-\https://github.com/adudu21isme/vinegar-rpc"
+            "User-Agent": r"VinegarRPCUser-\https://github.com/adudu21isme/vinegar-rpc"
             }
         )
 
