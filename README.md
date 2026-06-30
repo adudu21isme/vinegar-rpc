@@ -2,9 +2,9 @@
 > This is pending, do not install yet. Once this is complete, this warning will be removed.
 
 # RPC for [Vinegar](https://github.com/vinegarhq/vinegar)
-Since the Rich presence of Vinegar does not work for me, i have made this workaround for myself and decided to make it public if anybody else wishes to use it for now.
+Since Vinegars rich presence does not currently work for me, i created this workaround and decided to publish it in case if it helps others.
 
-If Vinegar fully fixes their RPC and has all the statues in this, then this repo will be archived.
+If Vinegar fixes its rich presence feature and supports all of the statuses provided by this repo then this repository will be archived.
 
 ## How to install?
 1. In KDE Plasma, right click on the menu button in taskbar and then click "Edit Applications" then search for Vinegar
