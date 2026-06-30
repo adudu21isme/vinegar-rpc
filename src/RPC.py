@@ -382,7 +382,7 @@ def handle_line(line: str, state: PresenceState) -> bool:
     elif channel == "StudioKeyEvents" and message == "start local server/player test":
         changed |= set_mode(state, "serverandclient")
     elif channel == "StudioKeyEvents" and message == "cleanup test players and servers":
-        changed |= set_mode(state, "returnworkspace")
+        changed |= set_mode(state, "workspace")
     elif channel == "telemetryLog" and message == "State: TeamTestInit":
         changed |= set_mode(state, "teamtest")
     elif action in ("simulationResetAction", "cleanupTeamTestAction"):
