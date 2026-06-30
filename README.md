@@ -2,7 +2,7 @@
 > This is pending, do not install yet. Once this is complete, this warning will be removed.
 
 # RPC for [Vinegar](https://github.com/vinegarhq/vinegar)
-Since Vinegars rich presence does not currently work for me, i created this workaround and decided to publish it in case it helps others.
+Since Vinegars rich presence does not currently work for me (i use Vesktop), i created this workaround and decided to publish it in case it helps others.
 
 If Vinegar fixes its rich presence feature and supports all of the statuses provided by this repository then this repo will be archived.
 
