@@ -15,10 +15,10 @@ If Vinegar fully fixes their RPC and has all the statues in this, then this repo
 2. Download [launch_studio.sh](src/launch_studio.sh) and ideally save it to your `~/Documents` folder
 3. Open `launch studio.sh` in a program that permits you to edit .sh files like Kate, then replace:
 ```bash
-/usr/bin/flatpak run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
+run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
 with the Command-Line arguments that are visible in KDE Menu Editor (click in the textbox, press CTRL+A then press CTRL+C and replace the mentioned code with the Command-Line args)
-<img width="1903" height="527" alt="image" src="https://github.com/user-attachments/assets/44d45368-a26b-4b5b-bb66-b1592543faf0" />
+<img width="1330" height="419" alt="image" src="https://github.com/user-attachments/assets/06e21b29-0155-4e89-8033-dbee5354d52c" />
 4. After replacing the code, set the Command-line args to simply
 ```
 %u
