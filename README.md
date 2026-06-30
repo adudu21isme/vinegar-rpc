@@ -51,7 +51,8 @@ And change Program to the location of the `launch_studio.sh` script
 8. Close settings and launch studio, it should ideally work if the python script is running successfully!
 
 ## How to uninstall once fully installed?
-1. Open your `launch studio.sh` and copy the Command-Line arguments which is after `/usr/bin/flatpak`, for reference in:
+1. Ensure Vinegar is completely closed/all Roblox Studio instances are closed
+2. Open your `launch studio.sh` and copy the Command-Line arguments which is after `/usr/bin/flatpak`, for reference in:
 ```
 exec /usr/bin/flatpak run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
@@ -59,9 +60,9 @@ you would copy
 ```
 run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
-2. Open KDE menu editor (which is shown how to do in [How to Install](#how-to-install), find Vinegar and replace its Command-Line args with the correct copied args
-3. Replace "Program" with
+3. Open KDE menu editor (which is shown how to do in [How to Install](#how-to-install), find Vinegar and replace its Command-Line args with the correct copied args
+4. Replace "Program" with
 ```
 /usr/bin/flatpak
 ```
-4. Delete `launch_studio.sh` and delete `RPC.py`
+5. Delete `launch_studio.sh` and delete `RPC.py`
