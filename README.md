@@ -12,8 +12,8 @@ If Vinegar fully fixes their RPC and has all the statues in this, then this repo
 > You may also right click on Vinegar in application menu and click "Edit Application":
 > <img width="1008" height="419" alt="image" src="https://github.com/user-attachments/assets/556e6945-cbd2-4068-a0cb-8753aa4983bc" />
 
-3. Download [launch_studio.sh](src/launch_studio.sh) and ideally save it to your `~/Documents` folder
-4. Open `launch studio.sh` in a program that permits you to edft .sh files like Kate, then replace:
+2. Download [launch_studio.sh](src/launch_studio.sh) and ideally save it to your `~/Documents` folder
+3. Open `launch studio.sh` in a program that permits you to edft .sh files like Kate, then replace:
 ```bash
 /usr/bin/flatpak run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
