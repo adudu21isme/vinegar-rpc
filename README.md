@@ -1,16 +1,23 @@
-> [!WARNING]
-> This is pending, do not install yet. Once this is complete, this warning will be removed.
-
 # RPC for [Vinegar](https://github.com/vinegarhq/vinegar)
 Since Vinegars rich presence does not currently work for me (i use Vesktop), i created this workaround and decided to publish it in case it helps others.
 
 If Vinegar fixes its rich presence feature and supports all of the statuses provided by this repository then this repo will be archived.
 
 ## How to install?
+> [!NOTE]
+> This assumes you have Python 3+ installed
 1. In KDE Plasma, right-click the application menu button on the taskbar, select **Edit Applications**, then search for **Vinegar**.
 > [!TIP]
 > You can also right-click **Vinegar** in the application menu and select **Edit Application**.
 > <img width="1008" height="419" alt="image" src="https://github.com/user-attachments/assets/556e6945-cbd2-4068-a0cb-8753aa4983bc" />
+
+> [!WARNING]
+> You must install the required packages, otherwise the script will not work.
+>
+> Run this command in your terminal to install them:
+> ```bash
+> pip install psutil pypresence
+> ```
 
 2. Download [launch_studio.sh](src/launch_studio.sh) and save it somewhere convenient (this guide assumes `~/Documents`).
 3. Open `launch_studio.sh` in a text editor such as Kate, then replace the following line:
@@ -50,7 +57,7 @@ and set **Program** to the location of `launch_studio.sh`.
 > This allows you to use Quick Sign-In (or another browser-based login method) if OAuth login does not work in Studio.
 8. Close the settings and launch Studio. RPC should now ideally work if the Python script is running successfully!
 
-## How to uninstall once fully installed?
+## How to uninstall once installed?
 1. Ensure Vinegar and all Roblox Studio instances are completely closed.
 2. Open `launch_studio.sh` and copy everything after `/usr/bin/flatpak`. For example in:
 ```
