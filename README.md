@@ -59,6 +59,8 @@ and set **Program** to the location of `launch_studio.sh`.
 8. Close the settings and launch Studio. RPC should now ideally work if the Python script is running successfully!
 
 ## How to uninstall once installed?
+> [!NOTE]
+> This assumes you are using KDE Plasma
 1. Ensure Vinegar and all Roblox Studio instances are completely closed.
 2. Open `launch_studio.sh` and copy everything after `/usr/bin/flatpak`. For example in:
 ```
