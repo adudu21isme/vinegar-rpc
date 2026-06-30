@@ -2,57 +2,57 @@
 > This is pending, do not install yet. Once this is complete, this warning will be removed.
 
 # RPC for [Vinegar](https://github.com/vinegarhq/vinegar)
-Since Vinegars rich presence does not currently work for me, i created this workaround and decided to publish it in case if it helps others.
+Since Vinegars rich presence does not currently work for me, i created this workaround and decided to publish it in case it helps others.
 
-If Vinegar fixes its rich presence feature and supports all of the statuses provided by this repo then this repository will be archived.
+If Vinegar fixes its rich presence feature and supports all of the statuses provided by this repository then this repo will be archived.
 
 ## How to install?
-1. In KDE Plasma, right click on the menu button in taskbar and then click "Edit Applications" then search for Vinegar
+1. In KDE Plasma, right-click the application menu button on the taskbar, select **Edit Applications**, then search for **Vinegar**.
 > [!TIP]
-> You may also right click on Vinegar in application menu and click "Edit Application":
+> You can also right-click **Vinegar** in the application menu and select **Edit Application**.
 > <img width="1008" height="419" alt="image" src="https://github.com/user-attachments/assets/556e6945-cbd2-4068-a0cb-8753aa4983bc" />
 
-2. Download [launch_studio.sh](src/launch_studio.sh) and ideally save it to your `~/Documents` folder
-3. Open `launch studio.sh` in a program that permits you to edit .sh files like Kate, then replace:
+2. Download [launch_studio.sh](src/launch_studio.sh) and save it somewhere convenient (this guide assumes `~/Documents`).
+3. Open `launch_studio.sh` in a text editor such as Kate, then replace the following line:
 ```bash
 run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
-with the Command-Line arguments that are visible in KDE Menu Editor (click in the textbox, press CTRL+A then press CTRL+C and replace the mentioned code with the Command-Line args)
+Replace it with the contents of the **Command-line arguments** field in **KDE Menu Editor**. Click inside the field, press Ctrl+A, then Ctrl+C, and paste the copied text over the command above.
 <img width="1330" height="419" alt="image" src="https://github.com/user-attachments/assets/06e21b29-0155-4e89-8033-dbee5354d52c" />
-4. After replacing the code, set the Command-line args to simply
+4. After editing `launch_studio.sh`, set **Command-line arguments** to:
 ```
 %u
 ```
-And change Program to the location of the `launch_studio.sh` script
+and set **Program** to the location of `launch_studio.sh`.
 <img width="1334" height="429" alt="image" src="https://github.com/user-attachments/assets/929a74ec-1392-42ca-a08b-eae023c4e2cc" />, which you can find via Dolphin:
 <img width="864" height="665" alt="image" src="https://github.com/user-attachments/assets/de07aee1-3027-45e0-a65c-1cb669c762a1" />
 
-5. Download [RPC.py](src/RPC.py) and save it to your `~/Documents` folder
+5. Download [RPC.py](src/RPC.py) and, ideally, save it in the same directory as `launch_studio.sh`.
 > [!NOTE]
-> If it is not in your documents folder then you will have to edit this in `launch.studio.sh`:
+> If you saved `RPC.py` somewhere else, edit this line in `launch_studio.sh`:
 > ```bash
 > "$HOME/Documents/RPC.py"
 > ```
-> to the proper location of RPC.py. like how we found "Program" KDE menu application field for vinegar.
-6. Find Vinegar in the application menu then right click it and click "Settings"
+> Replace it with the full path to `RPC.py`, similar to how you found the **Program** path for `launch_studio.sh`.
+6. Find **Vinegar** in the application menu, right-click it, and select **Settings**.
 <img width="743" height="98" alt="image" src="https://github.com/user-attachments/assets/9f7daf10-baaf-44c7-ab45-3fcce6cce6aa" />
 
 > [!TIP]
-> You may also open the settings via Terminal by typing
+> You can also open the settings from a terminal by running:
 > ```
 > flatpak run org.vinegarhq.Vinegar manage
 > ```
 
-7. Once you are in the settings of vinegar, toggle on "Web Pages"
+7. In the Vinegar settings, enable **Web Pages**.
 <img width="451" height="112" alt="image" src="https://github.com/user-attachments/assets/fa806da0-f84f-4925-a04a-ad57bc03dede" />
 
 > [!NOTE]
-> This is so if you have issues with the OAuth login method you can use Quick-Sign in/similar for Studio.
-8. Close settings and launch studio, it should ideally work if the python script is running successfully!
+> This allows you to use Quick Sign-In (or another browser-based login method) if OAuth login does not work in Studio.
+8. Close the settings and launch Studio. RPC should now ideally work if the Python script is running successfully!
 
 ## How to uninstall once fully installed?
-1. Ensure Vinegar is completely closed/all Roblox Studio instances are closed
-2. Open your `launch studio.sh` and copy the Command-Line arguments which is after `/usr/bin/flatpak`, for reference in:
+1. Ensure Vinegar and all Roblox Studio instances are completely closed.
+2. Open `launch_studio.sh` and copy everything after `/usr/bin/flatpak`. For example:
 ```
 exec /usr/bin/flatpak run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
@@ -60,9 +60,9 @@ you would copy
 ```
 run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinegarhq.Vinegar @@u "$@" @@
 ```
-3. Open KDE menu editor (which is shown how to do in [How to Install](#how-to-install), find Vinegar and replace its Command-Line args with the correct copied args
-4. Replace "Program" with
+3. Open KDE Menu Editor (see [How to install](#how-to-install)), locate **Vinegar**, and restore the original command-line arguments.
+4. Set **Program** to:
 ```
 /usr/bin/flatpak
 ```
-5. Delete `launch_studio.sh` and delete `RPC.py`
+5. Delete `launch_studio.sh` and `RPC.py`
