@@ -22,15 +22,17 @@ from typing import Optional, TextIO
 
 # Vars
 APP_ID = "1159891020956323923" # Regular title
-APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title
+APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title, for me (adudu21) i do actually use internal studio when i use this arg.
 
 # Location to studio
 username = Path.home().name # Fetch local username, originally it was steamuser but that was long time ago.
+
 # Log path
 LOG_DIR = os.path.expanduser(
     f"~/.var/app/org.vinegarhq.Vinegar/data/vinegar/prefixes/studio/"
     f"drive_c/users/{username}/AppData/Local/Roblox/logs"
 )
+
 # Convert
 LOG_DIR_REAL = os.path.realpath(LOG_DIR)
 
@@ -39,6 +41,7 @@ STUDIO_PROCESS_MATCH = "robloxstudiobeta.exe" # if roblox updates this then this
 
 # Config
 DOC_FOCUS_SETTLE_SECONDS = 2 # Roblox logs tend to spam the editing script thing so this is a attempted fix for that
+
 # How often to check
 PROCESS_CHECK_INTERVAL = 2
 
@@ -69,11 +72,28 @@ MODE_LABELS = {
     "workspace": "In workspace",
     "returnworkspace": "Returning to workspace",
     "scripting": "Editing a script",
-    "play": "Playtesting (solo)",
-    "run": "Running (server test)",
+    "play": "Playtesting (Solo)",
+    "playhere": "Playtesting (Solo, Test Here)",
+    "run": "Running",
     "teamtest": "Team testing",
     "serverandclient": "Playtesting (Server & Clients)"
 }
+
+RE_FLOG_TAG = re.compile(r"\[FLog::(\w+)\]\s*(.*)$")
+RE_TELEMETRY_TAG = re.compile(r"\[telemetryLog\]\s*(.*)$")
+RE_ACTION_NOT_HANDLED = re.compile(r"^Action (\w+) is not handled$")
+
+def parse_flog_tag(line: str) -> tuple[Optional[str], str]:
+    # FLog:: tags take priority — they appear first in every real engine line.
+    # A print faking "[telemetryLog]" still has [FLog::Output] before it,
+    # so RE_FLOG_TAG matches first and channel stays "Output".
+    match = RE_FLOG_TAG.search(line)
+    if match:
+        return match.group(1), match.group(2).strip()
+    match = RE_TELEMETRY_TAG.search(line)
+    if match:
+        return "telemetryLog", match.group(1).strip()
+    return None, line
 
 # Stuff to listen for
 RE_OPEN_PLACE_ID = re.compile(r"open place \(identifier = (\d+)\)")
@@ -91,7 +111,7 @@ def acquire_singleton_lock():
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         lock_file.close()
-        log("Another instance of this is already running. Exiting.")
+        log("Another instance of this script is already running. Exiting.")
         sys.exit(1)
     lock_file.write(str(os.getpid()))
     lock_file.flush()
@@ -139,18 +159,31 @@ def find_open_studio_log_paths(proc: psutil.Process) -> list[str]:
 
 # Cache
 _place_name_cache: "OrderedDict[str, str]" = OrderedDict()
+# Tracks place IDs that returned [TITLE UNAVAILABLE], with the monotonic time of
+# that result. suppresses repeated API hits; retries after the TTL in case the
+# place becomes public later.
+_place_name_unavailable_cache: dict[str, float] = {}
+TITLE_UNAVAILABLE_RETRY_SECONDS = 60
 
-# Will work if the place is public otherwise returns no title
+# fetch place name
 def resolve_place_name(place_id: str) -> Optional[str]:
     # If in cache then use that
     if place_id in _place_name_cache:
         _place_name_cache.move_to_end(place_id)
         return _place_name_cache[place_id]
+
+    if place_id in _place_name_unavailable_cache:
+        if time.monotonic() - _place_name_unavailable_cache[place_id] < TITLE_UNAVAILABLE_RETRY_SECONDS:
+            return None
+        del _place_name_unavailable_cache[place_id]
+
     try:
         # Fetch universe
         universe_req = urllib.request.Request(
             f"https://apis.roblox.com/universes/v1/places/{place_id}/universe",
-            headers={"User-Agent": "VinegarRPCKDEPlasma User"}
+            headers={
+            "User-Agent": r"VinegarRPCKDEPlasmaUser-\https://github.com/adudu21isme/vinegar-rpc-for-kde-plasma"
+            }
         )
 
         # Handler
@@ -160,7 +193,9 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         # Now, fetch name of it!
         game_req = urllib.request.Request(
             f"https://games.roblox.com/v1/games?universeIds={universe_id}",
-            headers={"User-Agent": "VinegarRPCKDEPlasma User"}
+            headers={
+            "User-Agent": r"VinegarRPCKDEPlasmaUser-\https://github.com/adudu21isme/vinegar-rpc-for-kde-plasma"
+            }
         )
 
         # Handle
@@ -173,12 +208,20 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         # Set
         name = data[0]["name"]
 
+        # Private/inaccessible places resolve a universe id fine, but the games API
+        # returns this literal placeholder instead of a real name so we treat it like a
+        # failed resolve therefore push_presence falls back to its wanted thing
+        if name == "[TITLE UNAVAILABLE]":
+            _place_name_unavailable_cache[place_id] = time.monotonic()
+            return None
+
         # Handle error
     except Exception as e:
         log(f"Failed to resolve place name for {place_id}: {e}")
         return None
     # Add to cache
     _place_name_cache[place_id] = name
+    _place_name_unavailable_cache.pop(place_id, None) # promote if place went public
 
     # Cache handler
     if len(_place_name_cache) > PLACE_NAME_CACHE_MAX:
@@ -196,6 +239,7 @@ class PresenceState:
     session_start: int = field(default_factory=lambda: int(time.time()))
     pending_doc_mode: Optional[str] = None
     pending_doc_since: float = 0
+    _suppress_next_output: bool = False
 
     def key(self) -> tuple:
         return (self.mode, self.place_id, self.place_name, self.place_local_name)
@@ -299,6 +343,7 @@ def push_presence(rpc: Optional[Presence], state: PresenceState) -> None:
 
 def handle_line(line: str, state: PresenceState) -> bool:
     changed = False
+    channel, message = parse_flog_tag(line)
 
     match = RE_LOCAL_FILE_OPEN.search(line)
     if match:
@@ -308,8 +353,8 @@ def handle_line(line: str, state: PresenceState) -> bool:
     if match:
         changed |= open_place(state, match.group(1))
 
-    # These are shown in real logs of 0.727.0.7271204
-    if "State: PlaceClosed" in line:
+    # These are shown in real logs of windows client studio version 0.727.0.7271204
+    if channel == "telemetryLog" and message == "State: PlaceClosed":
         changed |= close_place(state)
 
     match = RE_PLACE_NAME.search(line)
@@ -320,31 +365,46 @@ def handle_line(line: str, state: PresenceState) -> bool:
     if state.mode == "idle":
         return changed
 
-    # Some of these are the result of a "error" but i doubt roblox will patch it anytime soon for now
-    if "Action simulationPlayAction is not handled" in line:
+    # "Action X is not handled" only counts from FLog::Error. print()/warn() output
+    # always lands in FLog::Output, so faking this exact text can't be mistaken for it.
+    action = None
+    if channel == "Error":
+        action_match = RE_ACTION_NOT_HANDLED.match(message)
+        if action_match:
+            action = action_match.group(1)
+
+    if action == "simulationPlayAction":
         changed |= set_mode(state, "play")
-    elif "Action simulationRunAction is not handled" in line:
+    elif action == "simulationRunAction":
         changed |= set_mode(state, "run")
-    elif "[FLog::StudioKeyEvents] start local server/player test" in line:
+    elif action == "simulationPlayFromCameraAction":
+        changed |= set_mode(state, "playhere")
+    elif channel == "StudioKeyEvents" and message == "start local server/player test":
         changed |= set_mode(state, "serverandclient")
-    elif "State: TeamTestInit" in line:
+    elif channel == "StudioKeyEvents" and message == "cleanup test players and servers":
+        changed |= set_mode(state, "returnworkspace")
+    elif channel == "telemetryLog" and message == "State: TeamTestInit":
         changed |= set_mode(state, "teamtest")
-    elif (
-        "Action simulationResetAction is not handled" in line
-        or "Action cleanupTeamTestAction is not handled" in line
-    ):
+    elif action in ("simulationResetAction", "cleanupTeamTestAction"):
         # Returning to regular
         changed |= set_mode(state, "returnworkspace")
 
         # In regular
-    elif "State: PlaceIdle" in line:
+    elif channel == "telemetryLog" and message == "State: PlaceIdle":
         changed |= set_mode(state, "workspace")
 
         # if user is in a valid state, editing script will show correctly/similar
-    elif state.mode not in ("play", "placeinit", "run", "teamtest", "serverandclient"):
-        if "RobloxScriptDoc::activate - start" in line:
+    elif state.mode not in ("play", "playhere", "placeinit", "run", "teamtest", "serverandclient"):
+        if channel == "Output" and message.startswith("> "):
+            # Command bar echo, the next Output line is user print output, not engine.
+            state._suppress_next_output = True
+        elif channel == "Output" and state._suppress_next_output:
+            # user print result so discard and reset.
+            state._suppress_next_output = False
+        elif channel == "Output" and message == "Info: RobloxScriptDoc::activate - start":
             queue_doc_mode(state, "scripting")
-        elif "RobloxIDEDoc::activate - start" in line:
+        # FLog::RobloxIDEDoc is not reachable by print.
+        elif channel == "RobloxIDEDoc" and message == "RobloxIDEDoc::activate - start":
             queue_doc_mode(state, "workspace")
 
     return changed
@@ -405,6 +465,11 @@ def poll_sessions(sessions: dict[str, Session]) -> None:
 def pick_active_session(sessions: dict[str, Session]) -> Optional[Session]:
     if not sessions:
         return None
+    # Pin to the serverandclient session so spawned client/server instances
+    # (which start in workspace) don't displace it.
+    for session in sessions.values():
+        if session.state.mode == "serverandclient":
+            return session
     return max(sessions.values(), key=lambda s: s.last_activity)
 
 def main():
