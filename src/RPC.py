@@ -24,14 +24,11 @@ from typing import Optional, TextIO
 APP_ID = "1159891020956323923" # Regular title
 APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title, for me (adudu21) i do actually use internal studio when i use this arg.
 
-# Location to studio
-username = Path.home().name # Fetch local username, originally it was steamuser but that was long time ago.
-
 # Log path
 LOG_DIR = os.path.expanduser(
     f"~/.var/app/org.vinegarhq.Vinegar/data/vinegar/prefixes/studio/"
-    f"drive_c/users/{username}/AppData/Local/Roblox/logs"
-)
+    f"drive_c/users/{Path.home().name}/AppData/Local/Roblox/logs"
+) # Fetch local username, originally it was steamuser but that was long time ago.
 
 # Convert
 LOG_DIR_REAL = os.path.realpath(LOG_DIR)
@@ -84,7 +81,7 @@ RE_TELEMETRY_TAG = re.compile(r"\[telemetryLog\]\s*(.*)$")
 RE_ACTION_NOT_HANDLED = re.compile(r"^Action (\w+) is not handled$")
 
 def parse_flog_tag(line: str) -> tuple[Optional[str], str]:
-    # FLog:: tags take priority — they appear first in every real engine line.
+    # FLog:: tags take priority, they appear first in every real engine line.
     # A print faking "[telemetryLog]" still has [FLog::Output] before it,
     # so RE_FLOG_TAG matches first and channel stays "Output".
     match = RE_FLOG_TAG.search(line)
@@ -99,6 +96,7 @@ def parse_flog_tag(line: str) -> tuple[Optional[str], str]:
 RE_OPEN_PLACE_ID = re.compile(r"open place \(identifier = (\d+)\)")
 RE_LOCAL_FILE_OPEN = re.compile(r"open place \(identifier = [A-Za-z]:(.+?\.rbxlx?)\)") # any drive letter supported
 RE_PLACE_NAME = re.compile(r'(?:Saved|Published) new changes in "(.+?)" to Roblox\.')
+RE_STILL_EDITING_PLACE_NAME = re.compile(r'Published ".+?" to ".+?" in Roblox, but you are still editing "(.+?)"\.')
 
 # better log
 def log(msg: str) -> None:
@@ -144,6 +142,10 @@ def _is_studio_log_path(path: str) -> bool:
     basename = os.path.basename(path)
     return "_Studio_" in basename and basename.endswith(".log")
 
+# Incase if needed
+def _windows_basename(path: str) -> str:
+    return re.split(r"[\\/]+", path)[-1]
+
 # Find
 def find_open_studio_log_paths(proc: psutil.Process) -> list[str]:
     try:
@@ -160,8 +162,8 @@ def find_open_studio_log_paths(proc: psutil.Process) -> list[str]:
 # Cache
 _place_name_cache: "OrderedDict[str, str]" = OrderedDict()
 # Tracks place IDs that returned [TITLE UNAVAILABLE], with the monotonic time of
-# that result. suppresses repeated API hits; retries after the TTL in case the
-# place becomes public later.
+# that result. suppresses repeated API hits, retries after the TTL in case the
+# place becomes public.
 _place_name_unavailable_cache: dict[str, float] = {}
 TITLE_UNAVAILABLE_RETRY_SECONDS = 60
 
@@ -239,6 +241,7 @@ class PresenceState:
     session_start: int = field(default_factory=lambda: int(time.time()))
     pending_doc_mode: Optional[str] = None
     pending_doc_since: float = 0
+    test_child_log_paths: set[str] = field(default_factory=set)
     _suppress_next_output: bool = False
 
     def key(self) -> tuple:
@@ -270,6 +273,7 @@ def open_place(state: PresenceState, place_id: str) -> bool:
     if place_id == state.place_id:
         return False
     state.pending_doc_mode = None
+    state.test_child_log_paths.clear()
     state.place_id = place_id
     state.place_name = resolve_place_name(place_id)
     state.place_local_name = None
@@ -281,6 +285,7 @@ def close_place(state: PresenceState) -> bool:
     if state.mode == "idle":
         return False
     state.pending_doc_mode = None
+    state.test_child_log_paths.clear()
     state.mode = "idle"
     state.place_id = None
     state.place_name = None
@@ -292,6 +297,7 @@ def open_local_place(state: PresenceState, local_name: str) -> bool:
     if state.place_local_name == local_name and state.mode != "idle":
         return False
     state.pending_doc_mode = None
+    state.test_child_log_paths.clear()
     state.place_id = None
     state.place_name = None
     state.place_local_name = local_name
@@ -360,7 +366,7 @@ def handle_line(line: str, state: PresenceState) -> bool:
     if channel == "StudioKeyEvents":
         match = RE_LOCAL_FILE_OPEN.search(message)
         if match:
-            changed |= open_local_place(state, os.path.basename(match.group(1)))
+            changed |= open_local_place(state, _windows_basename(match.group(1)))
 
         match = RE_OPEN_PLACE_ID.search(message)
         if match:
@@ -373,7 +379,7 @@ def handle_line(line: str, state: PresenceState) -> bool:
     # actual "Saved/Published new changes" logs do show in regular output, same as
     # print(). this blocks faking it from the command bar.
     if channel == "Output" and not output_is_command_bar_result:
-        match = RE_PLACE_NAME.search(message)
+        match = RE_PLACE_NAME.search(message) or RE_STILL_EDITING_PLACE_NAME.search(message)
         if match and match.group(1) != state.place_name:
             state.place_name = match.group(1)
             changed = True
@@ -398,6 +404,7 @@ def handle_line(line: str, state: PresenceState) -> bool:
     elif action == "simulationPlayFromCameraAction":
         changed |= set_mode(state, "playhere")
     elif channel == "StudioKeyEvents" and message == "start local server/player test":
+        state.test_child_log_paths.clear()
         changed |= set_mode(state, "serverandclient")
     elif channel == "StudioKeyEvents" and message == "cleanup test players and servers":
         changed |= set_mode(state, "workspace")
@@ -461,6 +468,24 @@ def reconcile_sessions(sessions: dict[str, Session]) -> bool:
     for path, pid in live_paths.items():
         if path not in sessions:
             sessions[path] = open_session(path, pid)
+            # A local server/player test spawns its server (and client) as separate
+            # Studio processes, each showing up here as a brand new session. Track it
+            # against whichever session is mid-test so we know the test is over once
+            # every one of these has ended, regardless of which Studio window/instance
+            # was used to stop it. This only relies on process/log discovery we already
+            # trust (get_studio_processes/find_open_studio_log_paths), not on matching
+            # a pid number out of Roblox's own log text.
+            # Only adopt when exactly one serverandclient session is a candidate parent.
+            # If two Studio windows are both mid-test at once, we can't tell which one
+            # spawned this child, so we skip adoption rather than guess, guessing wrong
+            # would let one test's child falsely empty out the other test's tracked set
+            # and flip it back to "workspace" while it's still running.
+            candidate_parents = [
+                other for other in sessions.values()
+                if other.log_path != path and other.state.mode == "serverandclient"
+            ]
+            if len(candidate_parents) == 1:
+                candidate_parents[0].state.test_child_log_paths.add(path)
     return True
 
 def poll_sessions(sessions: dict[str, Session]) -> None:
@@ -473,6 +498,20 @@ def poll_sessions(sessions: dict[str, Session]) -> None:
                 session.last_activity = time.monotonic()
         if commit_pending_doc_mode(session.state):
             session.last_activity = time.monotonic()
+
+def reap_ended_tests(sessions: dict[str, Session]) -> None:
+    # Child test sessions get cleaned up by reconcile_sessions like any other Studio
+    # window, that check already works regardless of which instance stopped the test.
+    # Once every child session tracked against a serverandclient session is gone, the
+    # test is over.
+    for session in sessions.values():
+        state = session.state
+        if not state.test_child_log_paths:
+            continue
+        state.test_child_log_paths &= sessions.keys()
+        if not state.test_child_log_paths and state.mode in ("play", "playhere", "run", "teamtest", "serverandclient"):
+            if set_mode(state, "workspace"):
+                session.last_activity = time.monotonic()
 
 def pick_active_session(sessions: dict[str, Session]) -> Optional[Session]:
     if not sessions:
@@ -521,6 +560,7 @@ def main():
                 if not reconcile_sessions(sessions):
                     log("Roblox Studio closed completely. Clearing presence")
                     break
+                reap_ended_tests(sessions)
 
             poll_sessions(sessions)
 
