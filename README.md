@@ -36,7 +36,7 @@ and set **Program** to the location of `launch_studio.sh`.
 <img width="864" height="665" alt="image" src="https://github.com/user-attachments/assets/de07aee1-3027-45e0-a65c-1cb669c762a1" />
 
 5. Download [RPC.py](src/RPC.py) and, ideally, save it in the same directory as `launch_studio.sh`.
-> [!NOTE]
+> [!WARNING]
 > If you saved `RPC.py` somewhere else, edit this line in `launch_studio.sh`:
 > ```bash
 > "$HOME/Documents/RPC.py"
