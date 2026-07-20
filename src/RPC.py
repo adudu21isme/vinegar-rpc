@@ -54,13 +54,17 @@ PLACE_NAME_CACHE_MAX = 100
 LOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vinegar_rpc.lock")
 
 # if "python RPC.py --internal" then it will use internal app
+# "python RPC.py --hide-placeid" swaps the numeric place ID fallback for "Private Place"
 def _parse_args() -> "argparse.Namespace":
     p = argparse.ArgumentParser()
     p.add_argument("--internal", action="store_true")
+    p.add_argument("--hide-placeid", action="store_true")
     return p.parse_args()
 
 # so we know
-IS_INTERNAL: bool = _parse_args().internal
+_args = _parse_args()
+IS_INTERNAL: bool = _args.internal
+HIDE_PLACEID: bool = _args.hide_placeid
 
 # states
 MODE_LABELS = {
@@ -323,10 +327,13 @@ def push_presence(rpc: Optional[Presence], state: PresenceState) -> None:
         details = "Idle"
     elif state.place_local_name and not state.place_id:
         details = state.place_local_name
+    elif state.place_name:
+        details = state.place_name
+    elif state.place_id:
+        # Non resolved name
+        details = "Private Place" if HIDE_PLACEID else f"PlaceID {state.place_id}"
     else:
-        details = state.place_name or (
-            f"PlaceID {state.place_id}" if state.place_id else "Untitled Place"
-        )
+        details = "Untitled Place"
 
     # Fetch, fallback if not
     state_str = MODE_LABELS.get(state.mode, "In Studio")
