@@ -14,6 +14,10 @@ If Vinegar fixes its rich presence feature and supports all of the statuses prov
 - Team testing
 - Server & Clients playtest
 
+Example video of this script (click to watch):
+
+[![Video showcase](https://img.youtube.com/vi/cdGw7Uqi9r0/hqdefault.jpg)](https://www.youtube.com/watch?v=cdGw7Uqi9r0)
+
 ## How to install?
 > [!NOTE]
 > This assumes you have Python 3+ installed and are using KDE Plasma and that vinegar is intalled via Flatpak
