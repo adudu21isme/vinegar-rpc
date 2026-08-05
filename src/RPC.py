@@ -361,7 +361,7 @@ def handle_line(line: str, state: PresenceState) -> bool:
     # Command bar echoes ("> <code>")
     # every output channel check below has to skip both.
     output_is_command_bar_result = False
-    if channel == "Output":
+    if channel == "CreatorOutput":
         if message.startswith("> "):
             state._suppress_next_output = True
             output_is_command_bar_result = True
@@ -379,13 +379,12 @@ def handle_line(line: str, state: PresenceState) -> bool:
         if match:
             changed |= open_place(state, match.group(1))
 
-    # in real logs of windows client studio version 0.727.0.7271204
-    if channel == "telemetryLog" and message == "State: PlaceClosed":
+    if channel == "telemetryLog" and message in ("State: PlaceClosed", "State: OpenPlaceCanceled"):
         changed |= close_place(state)
 
     # actual "Saved/Published new changes" logs do show in regular output, same as
     # print(). this blocks faking it from the command bar.
-    if channel == "Output" and not output_is_command_bar_result:
+    if channel == "CreatorOutput" and not output_is_command_bar_result:
         match = RE_PLACE_NAME.search(message) or RE_STILL_EDITING_PLACE_NAME.search(message)
         if match and match.group(1) != state.place_name:
             state.place_name = match.group(1)
@@ -427,6 +426,7 @@ def handle_line(line: str, state: PresenceState) -> bool:
 
         # if user is in a valid state, editing script will show correctly/similar
     elif state.mode not in ("play", "playhere", "placeinit", "run", "teamtest", "serverandclient"):
+        # this is kept, logs dont show CreatorOutput
         if channel == "Output" and not output_is_command_bar_result and message == "Info: RobloxScriptDoc::activate - start":
             queue_doc_mode(state, "scripting")
         # FLog::RobloxIDEDoc is not reachable by print.
@@ -576,8 +576,6 @@ def main():
             display_key = (active.log_path if active else None, display_state.key())
 
             if display_key != last_displayed:
-                if active:
-                    log(f"now showing session: {active.log_path}")
                 push_presence(rpc, display_state)
                 last_displayed = display_key
 
