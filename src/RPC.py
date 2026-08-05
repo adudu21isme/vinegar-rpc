@@ -573,7 +573,7 @@ def main():
 
             active = pick_active_session(sessions)
             display_state = active.state if active else fallback_idle_state
-            display_key = (active.log_path if active else None, display_state.key())
+            display_key = display_state.key()
 
             if display_key != last_displayed:
                 push_presence(rpc, display_state)
