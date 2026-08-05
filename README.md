@@ -3,6 +3,17 @@ Since Vinegars rich presence does not currently work for me (i use [Vesktop](htt
 
 If Vinegar fixes its rich presence feature and supports all of the statuses provided by this repository then this repo will be archived.
 
+### States supported:
+- Not in a place (aka studio home screen)
+- Opening a place
+- In workspace of a place
+- Returning to workspace after finished playtesting/similar
+- Editing a script
+- Playtest solo & Playtest here
+- Running place
+- Team testing
+- Server & Clients playtest
+
 ## How to install?
 > [!NOTE]
 > This assumes you have Python 3+ installed and are using KDE Plasma and that vinegar is intalled via Flatpak
