@@ -5,7 +5,7 @@ If Vinegar fixes its rich presence feature and supports all of the statuses prov
 
 ## How to install?
 > [!NOTE]
-> This assumes you have Python 3+ installed and are using KDE Plasma
+> This assumes you have Python 3+ installed and are using KDE Plasma and that vinegar is intalled via Flatpak
 1. In KDE Plasma, right-click the application menu button on the taskbar, select **Edit Applications**, then search for **Vinegar**.
 > [!TIP]
 > You can also right-click **Vinegar** in the application menu and select **Edit Application**.
