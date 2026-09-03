@@ -57,6 +57,20 @@ and set **Program** to the location of `launch_studio.sh`.
 > "$HOME/Documents/RPC.py"
 > ```
 > with the full path to `RPC.py`, similar to how you found the **Program** path for `launch_studio.sh`.
+
+> [!NOTE]
+> This script supports optional flags/args:
+> - `--hide-placeid` replaces the fallback when it cannot get the name of a Place, so instead of falling back to the PlaceID, it will display "Private Place".
+> - `--internal` makes the RPC title Roblox Studio [Internal], i dont suggest using this arg if you are not actually using internal studio, yes im aware it does not have the channel prefix.
+>
+> Example on how to add flag(s) you want after the path in `launch_studio.sh`:
+> ```bash
+> python "$HOME/Documents/RPC.py" --hide-placeid &
+> ```
+> Both can be combined:
+> ```bash
+> python "$HOME/Documents/RPC.py" --hide-placeid --internal &
+> ```
 6. Find **Vinegar** in the application menu, right-click it, and select **Settings**.
 <img width="743" height="98" alt="image" src="https://github.com/user-attachments/assets/9f7daf10-baaf-44c7-ab45-3fcce6cce6aa" />
 
