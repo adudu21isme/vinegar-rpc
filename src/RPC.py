@@ -34,7 +34,7 @@ LOG_DIR = os.path.expanduser(
 LOG_DIR_REAL = os.path.realpath(LOG_DIR)
 
 # Current process name
-STUDIO_PROCESS_MATCH = "robloxstudiobeta.exe" # if roblox updates this then this will be modified
+STUDIO_PROCESS_MATCH = "robloxstudiobeta.exe" # if roblox updates this then this will be modified. When will studio no longer be in beta :thinking:
 
 # Config
 DOC_FOCUS_SETTLE_SECONDS = 2 # Roblox logs tend to spam the editing script thing so this is a attempted fix for that
@@ -53,8 +53,7 @@ PLACE_NAME_CACHE_MAX = 100
 # Fetch lock path
 LOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vinegar_rpc.lock")
 
-# if "python RPC.py --internal" then it will use internal app
-# "python RPC.py --hide-placeid" swaps the numeric place ID fallback for "Private Place"
+# Refer to README.md or launch_studio.sh for information on what this does.
 def _parse_args() -> "argparse.Namespace":
     p = argparse.ArgumentParser()
     p.add_argument("--internal", action="store_true")
@@ -215,7 +214,7 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         name = data[0]["name"]
 
         # Private/inaccessible places resolve a universe id fine, but the games API
-        # returns this literal placeholder instead of a real name so we treat it like a
+        # returns this literal placeholder instead of a real name so treat it like a
         # failed resolve therefore push_presence falls back to its wanted thing
         if name == "[TITLE UNAVAILABLE]":
             _place_name_unavailable_cache[place_id] = time.monotonic()
@@ -382,8 +381,6 @@ def handle_line(line: str, state: PresenceState) -> bool:
     if channel == "telemetryLog" and message in ("State: PlaceClosed", "State: OpenPlaceCanceled"):
         changed |= close_place(state)
 
-    # actual "Saved/Published new changes" logs do show in regular output, same as
-    # print(). this blocks faking it from the command bar.
     if channel == "CreatorOutput" and not output_is_command_bar_result:
         match = RE_PLACE_NAME.search(message) or RE_STILL_EDITING_PLACE_NAME.search(message)
         if match and match.group(1) != state.place_name:
@@ -481,12 +478,7 @@ def reconcile_sessions(sessions: dict[str, Session]) -> bool:
             # every one of these has ended, regardless of which Studio window/instance
             # was used to stop it. This only relies on process/log discovery we already
             # trust (get_studio_processes/find_open_studio_log_paths), not on matching
-            # a pid number out of Roblox's own log text.
-            # Only adopt when exactly one serverandclient session is a candidate parent.
-            # If two Studio windows are both mid-test at once, we can't tell which one
-            # spawned this child, so we skip adoption rather than guess, guessing wrong
-            # would let one test's child falsely empty out the other test's tracked set
-            # and flip it back to "workspace" while it's still running.
+            # a pid number out of Roblox own log text.
             candidate_parents = [
                 other for other in sessions.values()
                 if other.log_path != path and other.state.mode == "serverandclient"
