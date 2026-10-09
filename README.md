@@ -104,4 +104,6 @@ run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinega
 ```
 /usr/bin/flatpak
 ```
+> [!WARNING]
+> Once you have modified the above, if using KDE Plasma, you may need to Log Out of the current active session and then Relogin for it to apply immediately.
 5. Delete `launch_studio.sh` and `RPC.py`
