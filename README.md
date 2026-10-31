@@ -78,9 +78,16 @@ and set **Program** to the location of `launch_studio.sh`.
 > You can also open the settings from a terminal by running:
 > ```
 > flatpak run org.vinegarhq.Vinegar manage
-> `
-``
+> ```
+
 7. Close the settings and launch Studio. RPC should now ideally work if the Python script is running successfully!
+
+> [!NOTE]
+> You may want to enable **Web Pages** in Vinegar settings if login does not work, if still can't login, probably a Vinegar problem, if you can confirm it is not a problem by Vinegar, create an issue in this repo.
+> 
+> <img width="451" height="112" alt="image" src="https://github.com/user-attachments/assets/fa806da0-f84f-4925-a04a-ad57bc03dede" />
+>
+> This allows you to use Quick Sign-In (or another browser-based login method) if OAuth login does not work in Studio.
 
 ## How to uninstall once installed?
 > [!NOTE]
