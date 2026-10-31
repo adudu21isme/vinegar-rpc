@@ -47,7 +47,7 @@ with the contents of the **Command-line arguments** field in **KDE Menu Editor**
 %u
 ```
 and set **Program** to the location of `launch_studio.sh`.
-<img width="1334" height="429" alt="image" src="https://github.com/user-attachments/assets/929a74ec-1392-42ca-a08b-eae023c4e2cc" />, which you can find via Dolphin:
+<img width="1334" height="429" alt="image" src="https://github.com/user-attachments/assets/929a74ec-1392-42ca-a08b-eae023c4e2cc" />, which you can find via Dolphin (for Program Location for KDE Menu Editor):
 <img width="864" height="665" alt="image" src="https://github.com/user-attachments/assets/de07aee1-3027-45e0-a65c-1cb669c762a1" />
 
 5. Download [RPC.py](src/RPC.py) and, ideally, save it in the same directory as `launch_studio.sh`. Afterwards, should be ready.
