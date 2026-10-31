@@ -61,7 +61,7 @@ and set **Program** to the location of `launch_studio.sh`.
 > [!NOTE]
 > This script supports optional flags/args:
 > - `--hide-placeid` replaces the fallback when it cannot get the name of a Place, so instead of falling back to the PlaceID, it will display "Private Place".
-> - `--internal` makes the RPC title Roblox Studio [Internal], i dont suggest using this arg if you are not actually using internal studio, yes im aware it does not have the channel prefix.
+> - `--internal` makes the RPC title Roblox Studio [Internal], i don't suggest using this arg if you are not actually using internal studio, yes im aware it does not have the channel prefix.
 >
 > Example on how to add flag(s) you want after the path in `launch_studio.sh`:
 > ```bash
