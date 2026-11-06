@@ -20,7 +20,7 @@ from pypresence.types import StatusDisplayType
 from typing import Optional, TextIO
 
 # Vars
-APP_ID = "1159891020956323923" # Regular title
+APP_ID = "1521255719138234478" # Regular title
 APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title, for me (adudu21) i do actually use internal studio when i use this arg.
 
 # Log path (Vinegar redirects Roblox's AppData to vinegar/appdata/Roblox)
