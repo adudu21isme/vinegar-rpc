@@ -83,14 +83,32 @@ and set **Program** to the location of `launch_studio.sh`.
 > This script supports optional flags/args:
 > - `--hide-placeid` replaces the fallback when it cannot get the name of a Place, so instead of falling back to the PlaceID, it will display "Private Place".
 > - `--internal` makes the RPC title Roblox Studio [Internal], i don't suggest using this arg if you are not actually using internal studio, yes im aware it does not have the channel prefix.
+> - `--no-update-check` turns off the update check (see [Updating](#updating)).
 >
 > Example on how to add flag(s) you want after the path in `launch_studio.sh`:
 > ```bash
 > python "$HOME/Documents/RPC.py" --hide-placeid &
 > ```
-> Both can be combined:
+> Flags can be combined:
 > ```bash
-> python "$HOME/Documents/RPC.py" --hide-placeid --internal &
+> python "$HOME/Documents/RPC.py" --hide-placeid --internal --no-update-check &
+> ```
+
+## Updating
+When you start Studio, the script checks GitHub for a newer release. If there is one, a desktop notification shows up, clicking it brings you here.
+
+> [!NOTE]
+> The popup needs `notify-send` (`libnotify` package), without it nothing is shown and the script only logs it. You can turn the check off with `--no-update-check`.
+
+1. Ensure all Roblox Studio instances are completely closed (this also stops the old script).
+2. Download the new [RPC.py](src/RPC.py) and replace your old one, same location (`~/Documents/RPC.py` if you followed this guide).
+3. Check the [latest release notes](https://github.com/adudu21isme/vinegar-rpc/releases/latest). If it says `launch_studio.sh` changed too, copy the changes into your file by hand instead of replacing it, since yours has your own Vinegar command and flags in it.
+4. Launch Studio as usual.
+
+> [!TIP]
+> Not sure which version you have? Run this (change the path if you saved `RPC.py` elsewhere):
+> ```bash
+> grep '^VERSION' "$HOME/Documents/RPC.py"
 > ```
 
 ## How to uninstall once installed?
