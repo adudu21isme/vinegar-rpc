@@ -2,6 +2,7 @@
 
 # Require
 import urllib.request
+import asyncio
 import urllib.parse
 import argparse
 import threading
@@ -21,12 +22,16 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pypresence import Presence
+from pypresence.exceptions import ServerError
 from pypresence.types import StatusDisplayType
 from typing import Optional, TextIO, Union
 
 # Vars
 APP_ID = "1521255719138234478" # Regular title
 APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title, for me (adudu21) i do actually use internal studio when i use this arg.
+
+# Sent with every HTTP request (GitHub's API rejects requests without a User-Agent)
+USER_AGENT = "VinegarRPCUser-https://github.com/adudu21isme/vinegar-rpc"
 
 # Update checker. Bump VERSION together with every GitHub release tag (tag "v1.2.0" -> "1.2.0")
 VERSION = "1.0.6"
@@ -54,6 +59,16 @@ DOC_FOCUS_SETTLE_SECONDS = 2 # Roblox logs tend to spam the editing script thing
 
 # How often to check
 PROCESS_CHECK_INTERVAL = 2
+
+# Discord connection (see DiscordLink)
+DISCORD_HANDSHAKE_TIMEOUT = 5 # one connection attempt is abandoned after this many seconds
+DISCORD_RESPONSE_TIMEOUT = 5 # Discord has to answer a presence update within this
+DISCORD_STOP_TIMEOUT = DISCORD_HANDSHAKE_TIMEOUT + DISCORD_RESPONSE_TIMEOUT + 2 # how long exiting waits for it
+LINK_CHECK_INTERVAL = 1 # how often a live connection is checked for being closed by Discord
+RECONNECT_MIN_SECONDS = 2 # first retry after a failed attempt or a lost connection
+RECONNECT_MAX_SECONDS = 30 # retries back off up to this
+RECONNECT_STABLE_SECONDS = 60 # a connection that lasted this long was healthy: its loss restarts the backoff
+PRESENCE_RETRY_SECONDS = 15 # retry after Discord rejected an update (the connection itself is fine)
 
 # Log stuff
 LOG_POLL_INTERVAL = 0.1
@@ -384,7 +399,7 @@ def check_for_update() -> None:
         req = urllib.request.Request(
             UPDATE_CHECK_URL,
             headers={
-                "User-Agent": "VinegarRPCUser-https://github.com/adudu21isme/vinegar-rpc",
+                "User-Agent": USER_AGENT,
                 "Accept": "application/vnd.github+json",
             },
         )
@@ -414,14 +429,18 @@ def check_for_update() -> None:
         log(f"Update check skipped: {e}")
 
 # Lock
+# The file is opened in append mode so a second instance can't wipe the PID of the running one,
+# and it is never deleted: the kernel drops the flock when the process dies, and unlinking it
+# would let a new instance lock the old file while another one creates and locks a fresh one.
 def acquire_singleton_lock():
-    lock_file = open(LOCK_PATH,"w")
+    lock_file = open(LOCK_PATH, "a+")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         lock_file.close()
         log("Another instance of this script is already running. Exiting.")
         sys.exit(1)
+    lock_file.truncate(0)
     lock_file.write(str(os.getpid()))
     lock_file.flush()
     return lock_file
@@ -474,7 +493,7 @@ def find_open_studio_log_paths(proc: psutil.Process) -> list[str]:
 _place_name_cache: "OrderedDict[str, str]" = OrderedDict()
 # Tracks place IDs that returned [TITLE UNAVAILABLE], with the monotonic time of
 # that result. suppresses repeated API hits, retries after the TTL in case the
-# place becomes public.
+# place becomes public. Capped like the name cache, oldest entry goes first.
 _place_name_unavailable_cache: dict[str, float] = {}
 TITLE_UNAVAILABLE_RETRY_SECONDS = 60
 
@@ -494,9 +513,7 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         # Fetch universe
         universe_req = urllib.request.Request(
             f"https://apis.roblox.com/universes/v1/places/{place_id}/universe",
-            headers={
-            "User-Agent": r"VinegarRPCUser-\https://github.com/adudu21isme/vinegar-rpc"
-            }
+            headers={"User-Agent": USER_AGENT}
         )
 
         # Handler
@@ -506,9 +523,7 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         # Now, fetch name of it!
         game_req = urllib.request.Request(
             f"https://games.roblox.com/v1/games?universeIds={universe_id}",
-            headers={
-            "User-Agent": r"VinegarRPCUser-\https://github.com/adudu21isme/vinegar-rpc"
-            }
+            headers={"User-Agent": USER_AGENT}
         )
 
         # Handle
@@ -526,6 +541,8 @@ def resolve_place_name(place_id: str) -> Optional[str]:
         # failed resolve therefore push_presence falls back to its wanted thing
         if name == "[TITLE UNAVAILABLE]":
             _place_name_unavailable_cache[place_id] = time.monotonic()
+            if len(_place_name_unavailable_cache) > PLACE_NAME_CACHE_MAX:
+                del _place_name_unavailable_cache[next(iter(_place_name_unavailable_cache))]
             return None
 
         # Handle error
@@ -626,9 +643,252 @@ def small_image_key(state: PresenceState) -> str:
             return "returnworkspace_local"
     return state.mode
 
+# Discord connection
+# One background thread owns the pypresence client, so a slow, hung or missing Discord can never
+# stall log reading, and a signal can never interrupt asyncio halfway through a call. The main loop
+# only hands it the presence it wants shown (the latest one wins). The thread connects, notices
+# when Discord goes away (or was never there), reconnects with a growing delay, and sends the
+# wanted presence again over every new connection.
+#
+# pypresence isn't built for repeated reconnects, so its own close() is never used:
+#  - every Presence() creates an event loop and connect() creates a second one, dropping the first
+#    unclosed, and a failed connect() leaves its loop open
+#  - close() raises before closing its loop if the client never connected, and it never closes the
+#    socket, it only writes a goodbye
+#  - the handshake waits for Discord's answer without a timeout
+#  - nothing runs the loop between calls, so a Discord that quit goes unnoticed until the next update
+# _Presence, _close_presence and _link_alive below deal with each of those.
+_NOT_SHOWN = object()
+
+def _describe(error: BaseException) -> str:
+    if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+        return "timed out waiting for Discord"
+    return str(error) or type(error).__name__
+
+class _Presence(Presence):
+    def __init__(self, *args, **kwargs) -> None:
+        self._loops: list = [] # every event loop pypresence creates for this client
+        super().__init__(*args, **kwargs)
+
+    def update_event_loop(self, loop) -> None:
+        if not any(loop is known for known in self._loops):
+            self._loops.append(loop)
+        super().update_event_loop(loop)
+
+    async def handshake(self) -> None:
+        await asyncio.wait_for(super().handshake(), DISCORD_HANDSHAKE_TIMEOUT)
+
+# Releases everything a client holds: the IPC socket and every event loop it made. Best effort and
+# never raises. goodbye=True also tells Discord we are leaving (pointless on a connection already known dead).
+def _close_presence(rpc: _Presence, goodbye: bool) -> None:
+    writer = rpc.sock_writer
+    if writer is not None:
+        if goodbye:
+            try:
+                rpc.send_data(2, {"v": 1, "client_id": rpc.client_id})
+            except Exception:
+                pass
+        try:
+            writer.transport.abort()
+        except Exception:
+            pass
+    rpc.sock_writer = None
+    rpc.sock_reader = None
+
+    loops = list(rpc._loops)
+    if not any(rpc.loop is known for known in loops):
+        loops.append(rpc.loop)
+    for loop in loops:
+        if loop.is_closed():
+            continue
+        try:
+            # abort() only schedules the socket's close, it happens the next time the loop runs
+            if not loop.is_running():
+                loop.run_until_complete(asyncio.sleep(0))
+        except Exception:
+            pass
+        try:
+            loop.close()
+        except Exception:
+            pass
+    rpc._loops.clear()
+
+# Is the connection still usable? Discord sends nothing unprompted over it, so the only thing that
+# can make the socket readable with no data behind it is Discord closing its end. Peeks through a
+# duplicate of the descriptor: it consumes nothing and leaves the original's state alone.
+def _link_alive(rpc: _Presence) -> bool:
+    writer = rpc.sock_writer
+    if writer is None:
+        return False
+    try:
+        sock = writer.get_extra_info("socket")
+        fd = sock.fileno() if sock is not None else -1
+        if fd < 0:
+            return False
+        dup_fd = os.dup(fd)
+        try:
+            probe = socket.socket(fileno=dup_fd)
+        except BaseException:
+            os.close(dup_fd)
+            raise
+        with probe:
+            try:
+                return probe.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) != b""
+            except (BlockingIOError, InterruptedError):
+                return True # open, nothing to read
+    except Exception:
+        return False
+
+class DiscordLink:
+    def __init__(self, app_id: str) -> None:
+        self._app_id = app_id
+        self._desired: Optional[tuple[tuple, dict, str]] = None # the main thread writes it, the worker reads it
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="discord-rpc", daemon=True)
+        # Everything below is only ever touched by the worker thread
+        self._rpc: Optional[_Presence] = None
+        self._shown: object = _NOT_SHOWN # key of the presence Discord shows over the current connection
+        self._connected_at = 0.0
+        self._delay = RECONNECT_MIN_SECONDS
+        self._next_attempt = 0.0
+        self._rejected: Optional[tuple] = None # key Discord refused, and when to try that same one again
+        self._push_retry_at = 0.0
+        self._announced = False # the user was already told Discord is unreachable
+
+    # Starts connecting in the background. Discord doesn't have to be running yet.
+    def start(self) -> None:
+        self._thread.start()
+
+    # Never blocks. The worker shows it as soon as there is a connection, and again after every reconnect.
+    def set_presence(self, key: tuple, fields: dict, label: str) -> None:
+        self._desired = (key, fields, label)
+        self._wake.set()
+
+    # Clears the presence and closes the connection.
+    def stop(self, timeout: float = DISCORD_STOP_TIMEOUT) -> None:
+        self._stop.set()
+        self._wake.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout)
+            if self._thread.is_alive():
+                log("Discord connection is still shutting down, leaving it to the OS.")
+
+    def _run(self) -> None:
+        try:
+            while True:
+                # Clear first, then look at _stop and _desired: anything set after this point leaves the
+                # flag raised, so the wait below returns at once and nothing is ever missed.
+                self._wake.clear()
+                if self._stop.is_set():
+                    break
+                try:
+                    self._step(time.monotonic())
+                except Exception as e: # a bug here must not kill the thread and with it the presence
+                    log(f"Discord connection error: {_describe(e)}. Reconnecting...")
+                    self._announced = True
+                    self._drop(time.monotonic())
+                self._wake.wait(self._wait_time(time.monotonic()))
+        finally:
+            self._finish()
+
+    def _wait_time(self, now: float) -> float:
+        if self._rpc is None:
+            return min(LINK_CHECK_INTERVAL, max(0.01, self._next_attempt - now))
+        return LINK_CHECK_INTERVAL
+
+    def _step(self, now: float) -> None:
+        if self._rpc is None:
+            if now < self._next_attempt or not self._connect():
+                return
+        elif not _link_alive(self._rpc):
+            log("Lost connection to Discord. Reconnecting...")
+            self._announced = True
+            self._drop(now)
+            return
+
+        desired = self._desired
+        if desired is None or desired[0] == self._shown:
+            return
+        if desired[0] == self._rejected and time.monotonic() < self._push_retry_at:
+            return
+        self._push(desired)
+
+    def _connect(self) -> bool:
+        rpc: Optional[_Presence] = None
+        connected = False
+        try:
+            rpc = _Presence(self._app_id,
+                            connection_timeout=DISCORD_HANDSHAKE_TIMEOUT,
+                            response_timeout=DISCORD_RESPONSE_TIMEOUT)
+            rpc.connect()
+            connected = True
+        except Exception as e:
+            if not self._announced:
+                self._announced = True
+                log(f"Discord is not reachable: {_describe(e)}. Retrying in the background.")
+            self._schedule_retry(time.monotonic())
+            return False
+        finally:
+            if not connected and rpc is not None:
+                _close_presence(rpc, goodbye=False)
+
+        self._rpc = rpc
+        self._shown = _NOT_SHOWN
+        self._rejected = None
+        self._connected_at = time.monotonic()
+        self._announced = False
+        log("Connected to RPC")
+        return True
+
+    def _push(self, desired: tuple[tuple, dict, str]) -> None:
+        key, fields, label = desired
+        try:
+            self._rpc.update(**fields)
+        except ServerError as e:
+            # Discord answered, so the connection is fine, it just didn't like this update
+            log(f"Discord rejected the presence update: {_describe(e)}")
+            self._rejected = key
+            self._push_retry_at = time.monotonic() + PRESENCE_RETRY_SECONDS
+            return
+        except Exception as e:
+            log(f"Failed to update RPC: {_describe(e)}. Reconnecting...")
+            self._announced = True
+            self._drop(time.monotonic())
+            return
+        self._shown = key
+        self._rejected = None
+        log(f"RPC updated: {label}")
+
+    def _drop(self, now: float) -> None:
+        rpc, self._rpc = self._rpc, None
+        self._shown = _NOT_SHOWN
+        if rpc is not None:
+            _close_presence(rpc, goodbye=False)
+            if now - self._connected_at >= RECONNECT_STABLE_SECONDS:
+                self._delay = RECONNECT_MIN_SECONDS # it was healthy for a while, so this is a fresh outage
+        self._schedule_retry(now)
+
+    def _schedule_retry(self, now: float) -> None:
+        self._next_attempt = now + self._delay
+        self._delay = min(self._delay * 2, RECONNECT_MAX_SECONDS)
+
+    def _finish(self) -> None:
+        rpc, self._rpc = self._rpc, None
+        shown, self._shown = self._shown, _NOT_SHOWN
+        if rpc is None:
+            return
+        try:
+            if shown is not _NOT_SHOWN:
+                rpc.clear()
+        except Exception:
+            pass
+        finally:
+            _close_presence(rpc, goodbye=True)
+
 # Updates RPC
-def push_presence(rpc: Optional[Presence], state: PresenceState) -> None:
-    if rpc is None:
+def push_presence(link: Optional[DiscordLink], state: PresenceState) -> None:
+    if link is None:
         return
 
     if state.mode == "idle":
@@ -646,10 +906,10 @@ def push_presence(rpc: Optional[Presence], state: PresenceState) -> None:
     # Fetch, fallback if not
     state_str = MODE_LABELS.get(state.mode, "In Studio")
 
-    # Try updating
-    try:
-        # Update
-        rpc.update(
+    # Hand it over, the link sends it (and sends it again after a reconnect)
+    link.set_presence(
+        state.key(),
+        dict(
             status_display_type = StatusDisplayType.STATE,
             details = details,
             state = state_str,
@@ -657,10 +917,9 @@ def push_presence(rpc: Optional[Presence], state: PresenceState) -> None:
             large_image = "roblox_studio", # large image
             large_text = "Roblox Studio", # hover title
             small_image = small_image_key(state) # extra image
-        )
-        log(f"RPC updated: {details} | {state_str}")
-    except Exception as e:
-        log(f"Failed to update RPC: {e}")
+        ),
+        f"{details} | {state_str}",
+    )
 
 def handle_line(line: str, state: PresenceState) -> bool:
     changed = False
@@ -865,7 +1124,7 @@ def pick_active_session(sessions: dict[str, Session]) -> Optional[Session]:
 
 def main():
     lock = acquire_singleton_lock()
-    rpc = None
+    link = DiscordLink(APP_ID_INTERNAL if IS_INTERNAL else APP_ID)
     sessions: dict[str, Session] = {}
     fallback_idle_state = PresenceState()
 
@@ -882,16 +1141,12 @@ def main():
         if not NO_UPDATE_CHECK:
             threading.Thread(target=check_for_update, daemon=True).start()
 
-        try:
-            rpc = Presence(APP_ID_INTERNAL if IS_INTERNAL else APP_ID)
-            rpc.connect()
-            log("Connected to RPC")
-        except Exception as e:
-            log(f"Failed to connect to discord: {e}. Running in fallback mode.")
-            rpc = None
-
         wait_for_studio()
         _studio_seen.set()
+
+        # Connects in the background and keeps retrying, so Discord can start after this script
+        # or restart while Studio is open.
+        link.start()
 
         last_displayed = object()
         next_reconcile = 0
@@ -912,7 +1167,7 @@ def main():
             display_key = display_state.key()
 
             if display_key != last_displayed:
-                push_presence(rpc, display_state)
+                push_presence(link, display_state)
                 last_displayed = display_key
 
             time.sleep(LOG_POLL_INTERVAL)
@@ -923,22 +1178,10 @@ def main():
                 session.file.close()
             except Exception:
                 pass
-        if rpc:
-            try:
-                rpc.clear()
-            except Exception:
-                pass
-            try:
-                rpc.close()
-            except Exception:
-                pass
+        link.stop()
         try:
             lock.close()
         except Exception:
-            pass
-        try:
-            os.unlink(LOCK_PATH)
-        except OSError:
             pass
 
 if __name__ == "__main__":
