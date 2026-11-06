@@ -12,7 +12,7 @@ If Vinegar fixes its rich presence feature and supports all of the statuses prov
 - In workspace of a place
 - Returning to workspace after finished playtesting/similar
 - Editing a script
-- Playtest solo & Playtest here
+- Playtesting
 - Running place
 - Team testing
 - Server & Clients playtest
