@@ -24,17 +24,13 @@ from typing import Optional, TextIO
 APP_ID = "1159891020956323923" # Regular title
 APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title, for me (adudu21) i do actually use internal studio when i use this arg.
 
-# Log paths
-# Newer Vinegar redirects Roblox's AppData to vinegar/appdata/Roblox, older versions
-# used the wine prefix. Both are checked so the script works either way.
-LOG_DIR_CANDIDATES = [
-    "~/.var/app/org.vinegarhq.Vinegar/data/vinegar/appdata/Roblox/logs",
-    f"~/.var/app/org.vinegarhq.Vinegar/data/vinegar/prefixes/studio/"
-    f"drive_c/users/{Path.home().name}/AppData/Local/Roblox/logs",
-] # Fetch local username, originally it was steamuser but that was long time ago.
+# Log path (Vinegar redirects Roblox's AppData to vinegar/appdata/Roblox)
+LOG_DIR = os.path.expanduser(
+    "~/.var/app/org.vinegarhq.Vinegar/data/vinegar/appdata/Roblox/logs"
+)
 
 # Convert
-LOG_DIRS_REAL = {os.path.realpath(os.path.expanduser(p)) for p in LOG_DIR_CANDIDATES}
+LOG_DIR_REAL = os.path.realpath(LOG_DIR)
 
 # Current process name
 STUDIO_PROCESS_MATCH = "robloxstudiobeta.exe" # if roblox updates this then this will be modified. When will studio no longer be in beta :thinking:
@@ -161,7 +157,7 @@ def find_open_studio_log_paths(proc: psutil.Process) -> list[str]:
     matches = []
     for of in open_files:
         real = os.path.realpath(of.path)
-        if os.path.dirname(real) in LOG_DIRS_REAL and _is_studio_log_path(real):
+        if os.path.dirname(real) == LOG_DIR_REAL and _is_studio_log_path(real):
             matches.append(real)
     return matches
 
@@ -452,7 +448,13 @@ def open_session(log_path: str, pid: int) -> Session:
     log(f"Attached to session: {log_path} (pid {pid})")
     return Session(log_path=log_path, file=f, pid=pid, state=state)
 
+# If Studio is running but we never find its log, say so instead of silently sitting on "Idle"
+NO_LOG_WARN_TICKS = 10
+_no_log_ticks = 0
+_no_log_warned = False
+
 def reconcile_sessions(sessions: dict[str, Session]) -> bool:
+    global _no_log_ticks, _no_log_warned
     procs = get_studio_processes()
     if not procs:
         return False
@@ -460,6 +462,17 @@ def reconcile_sessions(sessions: dict[str, Session]) -> bool:
     for proc in procs:
         for path in find_open_studio_log_paths(proc):
             live_paths[path] = proc.pid
+
+    if live_paths or sessions:
+        _no_log_ticks = 0
+        _no_log_warned = False
+    else:
+        _no_log_ticks += 1
+        if _no_log_ticks >= NO_LOG_WARN_TICKS and not _no_log_warned:
+            _no_log_warned = True
+            pids = ", ".join(str(p.pid) for p in procs)
+            log(f"Studio is running (pid {pids}) but has no Studio log open in {LOG_DIR_REAL}, so place detection is off.")
+
     for path in list(sessions.keys()):
         if path in live_paths:
             sessions[path].missed_checks = 0
