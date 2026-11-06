@@ -3,6 +3,9 @@
 # Require
 import urllib.request
 import argparse
+import threading
+import subprocess
+import shutil
 import signal
 import psutil
 import fcntl
@@ -22,6 +25,16 @@ from typing import Optional, TextIO
 # Vars
 APP_ID = "1521255719138234478" # Regular title
 APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title, for me (adudu21) i do actually use internal studio when i use this arg.
+
+# Update checker. Bump VERSION together with every GitHub release tag (tag "v1.2.0" -> "1.2.0")
+VERSION = "1.0.6"
+UPDATE_CHECK_URL = "https://api.github.com/repos/adudu21isme/vinegar-rpc/releases/latest"
+UPDATE_CHECK_TIMEOUT = 5
+UPDATING_URL = "https://github.com/adudu21isme/vinegar-rpc#updating" # README section explaining how to update
+NOTIFY_TIMEOUT_MS = 30000 # how long the popup stays (and stays clickable)
+# Set by main() once Studio is running. The update notification waits for it so it pops up
+# when you actually sit down to use Studio instead of at login/boot when nobody is looking.
+_studio_seen = threading.Event()
 
 # Log path (Vinegar redirects Roblox's AppData to vinegar/appdata/Roblox)
 LOG_DIR = os.path.expanduser(
@@ -56,12 +69,14 @@ def _parse_args() -> "argparse.Namespace":
     p = argparse.ArgumentParser()
     p.add_argument("--internal", action="store_true")
     p.add_argument("--hide-placeid", action="store_true")
+    p.add_argument("--no-update-check", action="store_true")
     return p.parse_args()
 
 # so we know
 _args = _parse_args()
 IS_INTERNAL: bool = _args.internal
 HIDE_PLACEID: bool = _args.hide_placeid
+NO_UPDATE_CHECK: bool = _args.no_update_check
 
 # states
 MODE_LABELS = {
@@ -105,6 +120,95 @@ RE_STILL_EDITING_PLACE_NAME = re.compile(r'Published ".+?" to ".+?" in Roblox, b
 # better log
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+# Opens a link in the default browser, detached so it outlives this script.
+def open_in_browser(url: str) -> None:
+    exe = shutil.which("xdg-open")
+    if not exe:
+        log(f"xdg-open not found, open this manually: {url}")
+        return
+    try:
+        proc = subprocess.Popen([exe, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        proc.wait() # collect it so it doesn't linger as a zombie. Fine to block, we're in a background thread
+    except Exception as e:
+        log(f"Failed to open browser: {e}")
+
+# Desktop notification through notify-send (package "libnotify" / "libnotify-bin").
+# The script usually has no terminal, so log() alone would never be seen.
+# With open_url set, clicking the notification (or its button) opens that link. That needs
+# libnotify 0.8+ for --action; on older versions it falls back to a plain popup.
+def send_notification(title: str, body: str, open_url: Optional[str] = None) -> None:
+    exe = shutil.which("notify-send")
+    if not exe:
+        log("notify-send not found, install libnotify to get desktop notifications")
+        return
+    base = [exe, "-a", "Vinegar RPC", "-i", "software-update-available", "-t", str(NOTIFY_TIMEOUT_MS)]
+
+    if open_url:
+        try:
+            # --wait blocks until the popup is clicked/closed and prints the clicked action's name.
+            # "default" is a click on the notification itself, "open" is the button (Plasma shows it).
+            result = subprocess.run(
+                base + ["--wait", "--action=default=Open", "--action=open=How to update", title, body],
+                capture_output=True, text=True, timeout=NOTIFY_TIMEOUT_MS / 1000 + 5,
+            )
+            if result.returncode == 0:
+                if result.stdout.strip() in ("default", "open"):
+                    open_in_browser(open_url)
+                return
+            # Non-zero exit: most likely libnotify older than 0.8 (no --action), try a plain popup below
+        except subprocess.TimeoutExpired:
+            return
+        except Exception as e:
+            log(f"Failed to send notification: {e}")
+
+    try:
+        subprocess.run(base + [title, body], timeout=5, check=True, capture_output=True)
+    except Exception as e:
+        log(f"Failed to send notification: {e}")
+
+# "v1.2.3" -> (1, 2, 3). Anything after the numbers (like "-beta") is ignored.
+def _parse_version(tag: str) -> Optional[tuple[int, ...]]:
+    match = re.match(r"v?(\d+(?:\.\d+)*)", tag.strip(), re.IGNORECASE)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.group(1).split("."))
+
+# Asks GitHub for the latest release and only tells the user, it never replaces files.
+# Runs in a background thread so a slow or missing connection can't delay startup.
+def check_for_update() -> None:
+    try:
+        req = urllib.request.Request(
+            UPDATE_CHECK_URL,
+            headers={
+                "User-Agent": "VinegarRPCUser-https://github.com/adudu21isme/vinegar-rpc",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=UPDATE_CHECK_TIMEOUT) as resp:
+            release = json.load(resp)
+
+        latest = _parse_version(release.get("tag_name", ""))
+        current = _parse_version(VERSION)
+        if latest is None or current is None:
+            return
+
+        # Pad so (1, 2) and (1, 2, 0) count as the same version
+        width = max(len(latest), len(current))
+        latest_padded = latest + (0,) * (width - len(latest))
+        current_padded = current + (0,) * (width - len(current))
+
+        if latest_padded > current_padded:
+            log(f"Update available: {release['tag_name']} (you have v{VERSION}). How to update: {UPDATING_URL}")
+            _studio_seen.wait()
+            send_notification(
+                "Vinegar RPC update available",
+                f"{release['tag_name']} is out (you have v{VERSION}).\nHow to update: {UPDATING_URL}",
+                open_url=UPDATING_URL,
+            )
+    except Exception as e:
+        # No internet, rate limited, or no releases yet (404). Not worth bothering the user.
+        log(f"Update check skipped: {e}")
 
 # Lock
 def acquire_singleton_lock():
@@ -571,7 +675,9 @@ def main():
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGHUP, signal_handler)
 
-        log("Starting RPC service...")
+        log(f"Starting RPC service... (v{VERSION})")
+        if not NO_UPDATE_CHECK:
+            threading.Thread(target=check_for_update, daemon=True).start()
 
         try:
             rpc = Presence(APP_ID_INTERNAL if IS_INTERNAL else APP_ID)
@@ -582,6 +688,7 @@ def main():
             rpc = None
 
         wait_for_studio()
+        _studio_seen.set()
 
         last_displayed = object()
         next_reconcile = 0
