@@ -24,14 +24,17 @@ from typing import Optional, TextIO
 APP_ID = "1159891020956323923" # Regular title
 APP_ID_INTERNAL = "1521275755395416204" # Basically same but with Internal title, for me (adudu21) i do actually use internal studio when i use this arg.
 
-# Log path
-LOG_DIR = os.path.expanduser(
+# Log paths
+# Newer Vinegar redirects Roblox's AppData to vinegar/appdata/Roblox, older versions
+# used the wine prefix. Both are checked so the script works either way.
+LOG_DIR_CANDIDATES = [
+    "~/.var/app/org.vinegarhq.Vinegar/data/vinegar/appdata/Roblox/logs",
     f"~/.var/app/org.vinegarhq.Vinegar/data/vinegar/prefixes/studio/"
-    f"drive_c/users/{Path.home().name}/AppData/Local/Roblox/logs"
-) # Fetch local username, originally it was steamuser but that was long time ago.
+    f"drive_c/users/{Path.home().name}/AppData/Local/Roblox/logs",
+] # Fetch local username, originally it was steamuser but that was long time ago.
 
 # Convert
-LOG_DIR_REAL = os.path.realpath(LOG_DIR)
+LOG_DIRS_REAL = {os.path.realpath(os.path.expanduser(p)) for p in LOG_DIR_CANDIDATES}
 
 # Current process name
 STUDIO_PROCESS_MATCH = "robloxstudiobeta.exe" # if roblox updates this then this will be modified. When will studio no longer be in beta :thinking:
@@ -158,7 +161,7 @@ def find_open_studio_log_paths(proc: psutil.Process) -> list[str]:
     matches = []
     for of in open_files:
         real = os.path.realpath(of.path)
-        if os.path.dirname(real) == LOG_DIR_REAL and _is_studio_log_path(real):
+        if os.path.dirname(real) in LOG_DIRS_REAL and _is_studio_log_path(real):
             matches.append(real)
     return matches
 
