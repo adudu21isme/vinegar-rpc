@@ -1,3 +1,6 @@
+> [!CAUTION]
+> Don't install this yet; it is being fixed.
+
 # RPC for [Vinegar](https://github.com/vinegarhq/vinegar)
 Since Vinegars rich presence does not currently work for me (i use [Vesktop](https://vesktop.dev/)), this workaround has been created and decided to publish it in case it helps others.
 
