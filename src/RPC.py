@@ -17,7 +17,6 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pypresence import Presence
 from pypresence.types import StatusDisplayType
-from pathlib import Path
 from typing import Optional, TextIO
 
 # Vars
@@ -72,7 +71,6 @@ MODE_LABELS = {
     "returnworkspace": "Returning to workspace",
     "scripting": "Editing a script",
     "play": "Playtesting (Solo)",
-    "playhere": "Playtesting (Solo, Test Here)",
     "run": "Running",
     "teamtest": "Team testing",
     "serverandclient": "Playtesting (Server & Clients)"
@@ -80,7 +78,11 @@ MODE_LABELS = {
 
 RE_FLOG_TAG = re.compile(r"\[FLog::(\w+)\]\s*(.*)$")
 RE_TELEMETRY_TAG = re.compile(r"\[telemetryLog\]\s*(.*)$")
-RE_ACTION_NOT_HANDLED = re.compile(r"^Action (\w+) is not handled$")
+# The DataModel bridge reports which DataModel is current: PlayClient = Play (client + server),
+# PlayServer = Run (server only), Edit = back in the editor.
+RE_CURRENT_GST = re.compile(r"^setCurrentGameStateTypeAndDmId currentGst=StudioGameStateType_(\w+)")
+
+TEST_MODES = ("play", "run", "teamtest")
 
 def parse_flog_tag(line: str) -> tuple[Optional[str], str]:
     # FLog:: tags take priority, they appear first in every real engine line.
@@ -245,6 +247,7 @@ class PresenceState:
     pending_doc_since: float = 0
     test_child_log_paths: set[str] = field(default_factory=set)
     _suppress_next_output: bool = False
+    _awaiting_test_view: bool = False
 
     def key(self) -> tuple:
         return (self.mode, self.place_id, self.place_name, self.place_local_name)
@@ -389,39 +392,41 @@ def handle_line(line: str, state: PresenceState) -> bool:
     if state.mode == "idle":
         return changed
 
-    # "Action X is not handled" only counts from FLog::Error. print()/warn() always
-    # land in Output; error() can land in Error too, but gets a "CommandBar:N:" (or
-    # script path) prefix that breaks the ^Action...$ anchor below. keep this as
-    # .match(), not .search().
-    action = None
-    if channel == "Error":
-        action_match = RE_ACTION_NOT_HANDLED.match(message)
-        if action_match:
-            action = action_match.group(1)
+    # Play, Run and Test Here all begin with PlaySoloInit. Default to Play, then Run is
+    # told apart by the FIRST current DataModel Studio reports for the test: the server for
+    # Run, the client for Play. Only the first one counts, so switching the view between
+    # client and server during a Play test doesn't flip the status.
+    # (Play and Test Here write identical logs, so Test Here can't be distinguished.)
+    if channel == "telemetryLog" and message == "State: PlaySoloInit":
+        if state.mode not in ("teamtest", "serverandclient"):
+            state._awaiting_test_view = True
+            changed |= set_mode(state, "play")
+    elif channel == "DMListenerBridge" and state._awaiting_test_view and state.mode == "play":
+        gst_match = RE_CURRENT_GST.match(message)
+        if gst_match:
+            state._awaiting_test_view = False
+            if gst_match.group(1) == "PlayServer":
+                changed |= set_mode(state, "run")
+    elif channel == "telemetryLog" and message == "State: TeamTestInit":
+        changed |= set_mode(state, "teamtest")
+    elif channel == "telemetryLog" and message in ("State: StopPlaySolo", "State: StopTeamTest"):
+        if state.mode in TEST_MODES:
+            changed |= set_mode(state, "returnworkspace")
+    elif channel == "StudioKeyEvents" and message == "end play test":
+        if state.mode in TEST_MODES:
+            changed |= set_mode(state, "returnworkspace")
 
-    if action == "simulationPlayAction":
-        changed |= set_mode(state, "play")
-    elif action == "simulationRunAction":
-        changed |= set_mode(state, "run")
-    elif action == "simulationPlayFromCameraAction":
-        changed |= set_mode(state, "playhere")
+    # --- Server & Clients ---
     elif channel == "StudioKeyEvents" and message == "start local server/player test":
         state.test_child_log_paths.clear()
         changed |= set_mode(state, "serverandclient")
     elif channel == "StudioKeyEvents" and message == "cleanup test players and servers":
-        changed |= set_mode(state, "workspace")
-    elif channel == "telemetryLog" and message == "State: TeamTestInit":
-        changed |= set_mode(state, "teamtest")
-    elif action in ("simulationResetAction", "cleanupTeamTestAction"):
-        # Returning to regular
-        changed |= set_mode(state, "returnworkspace")
-
-        # In regular
+        changed |= set_mode(state, "returnworkspace" if state.mode == "teamtest" else "workspace")
     elif channel == "telemetryLog" and message == "State: PlaceIdle":
         changed |= set_mode(state, "workspace")
 
-        # if user is in a valid state, editing script will show correctly/similar
-    elif state.mode not in ("play", "playhere", "placeinit", "run", "teamtest", "serverandclient"):
+    # if user is in a valid state, editing script will show correctly/similar
+    elif state.mode not in ("play", "placeinit", "run", "teamtest", "serverandclient"):
         # this is kept, logs dont show CreatorOutput
         if channel == "Output" and not output_is_command_bar_result and message == "Info: RobloxScriptDoc::activate - start":
             queue_doc_mode(state, "scripting")
@@ -439,14 +444,30 @@ class Session:
     state: PresenceState = field(default_factory=PresenceState)
     last_activity: float = field(default_factory=time.monotonic)
     missed_checks: int = 0
+    partial: str = ""  # tail of a line Studio is still in the middle of writing
+
+def read_complete_lines(session: Session):
+    # Only hand out lines that end in a newline. If Studio is mid-write, readline() returns
+    # half a line; matching on that would miss the event (and the rest would show up as a
+    # separate fragment), so hold it back until the rest arrives.
+    while True:
+        chunk = session.file.readline()
+        if not chunk:
+            return
+        if not chunk.endswith("\n"):
+            session.partial += chunk
+            return
+        line = session.partial + chunk
+        session.partial = ""
+        yield line
 
 def open_session(log_path: str, pid: int) -> Session:
     f = open(log_path, "r", encoding="utf-8", errors="ignore")
-    state = PresenceState()
-    for line in f:
-        handle_line(line, state)
+    session = Session(log_path=log_path, file=f, pid=pid)
+    for line in read_complete_lines(session):
+        handle_line(line, session.state)
     log(f"Attached to session: {log_path} (pid {pid})")
-    return Session(log_path=log_path, file=f, pid=pid, state=state)
+    return session
 
 # If Studio is running but we never find its log, say so instead of silently sitting on "Idle"
 NO_LOG_WARN_TICKS = 10
@@ -505,10 +526,7 @@ def reconcile_sessions(sessions: dict[str, Session]) -> bool:
 
 def poll_sessions(sessions: dict[str, Session]) -> None:
     for session in sessions.values():
-        while True:
-            line = session.file.readline()
-            if not line:
-                break
+        for line in read_complete_lines(session):
             if handle_line(line, session.state):
                 session.last_activity = time.monotonic()
         if commit_pending_doc_mode(session.state):
@@ -524,7 +542,7 @@ def reap_ended_tests(sessions: dict[str, Session]) -> None:
         if not state.test_child_log_paths:
             continue
         state.test_child_log_paths &= sessions.keys()
-        if not state.test_child_log_paths and state.mode in ("play", "playhere", "run", "teamtest", "serverandclient"):
+        if not state.test_child_log_paths and state.mode in ("play", "run", "teamtest", "serverandclient"):
             if set_mode(state, "workspace"):
                 session.last_activity = time.monotonic()
 
