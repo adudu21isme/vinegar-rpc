@@ -1,2 +1,2 @@
 psutil
-pypresence
+pypresence>=4.5.2
