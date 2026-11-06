@@ -42,6 +42,24 @@ run --branch=stable --arch=x86_64 --command=vinegar --file-forwarding org.vinega
 ```
 with the contents of the **Command-line arguments** field in **KDE Menu Editor**. Click inside the field, press Ctrl+A, then Ctrl+C, and paste the copied text over the command above.
 <img width="1330" height="419" alt="image" src="https://github.com/user-attachments/assets/06e21b29-0155-4e89-8033-dbee5354d52c" />
+
+> [!WARNING]
+> **Check the end of the line you just pasted.** It must finish with `@@u "$@" @@`
+>
+> - If it says `%u` instead of `"$@"`, change it to `"$@"`.
+> - Keep the double quotes (`"`). Single quotes (`'`) won't work.
+>
+> ```bash
+> # ❌ Wrong
+> ... org.vinegarhq.Vinegar @@u %u @@
+> ... org.vinegarhq.Vinegar @@u '$@' @@
+>
+> # ✅ Right
+> ... org.vinegarhq.Vinegar @@u "$@" @@
+> ```
+>
+> **Why:** this part passes the ROBLOX link to Studio. If it's wrong, Studio will have problems, such as not being able to login via Browser Login.
+
 4. After editing `launch_studio.sh`, set **Command-line arguments** to:
 ```
 %u
