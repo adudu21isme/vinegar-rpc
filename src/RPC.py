@@ -2,11 +2,13 @@
 
 # Require
 import urllib.request
+import urllib.parse
 import argparse
 import threading
-import subprocess
-import shutil
+import webbrowser
 import signal
+import socket
+import struct
 import psutil
 import fcntl
 import json
@@ -20,7 +22,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pypresence import Presence
 from pypresence.types import StatusDisplayType
-from typing import Optional, TextIO
+from typing import Optional, TextIO, Union
 
 # Vars
 APP_ID = "1521255719138234478" # Regular title
@@ -121,49 +123,250 @@ RE_STILL_EDITING_PLACE_NAME = re.compile(r'Published ".+?" to ".+?" in Roblox, b
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
-# Opens a link in the default browser, detached so it outlives this script.
+# Opens a link in the default browser (standard library, it picks xdg-open, kde-open or a known browser).
 def open_in_browser(url: str) -> None:
-    exe = shutil.which("xdg-open")
-    if not exe:
-        log(f"xdg-open not found, open this manually: {url}")
-        return
     try:
-        proc = subprocess.Popen([exe, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        proc.wait() # collect it so it doesn't linger as a zombie. Fine to block, we're in a background thread
+        if not webbrowser.open(url):
+            log(f"Could not find a browser, open this manually: {url}")
     except Exception as e:
         log(f"Failed to open browser: {e}")
 
-# Desktop notification through notify-send (package "libnotify" / "libnotify-bin").
-# The script usually has no terminal, so log() alone would never be seen.
-# With open_url set, clicking the notification (or its button) opens that link. That needs
-# libnotify 0.8+ for --action; on older versions it falls back to a plain popup.
-def send_notification(title: str, body: str, open_url: Optional[str] = None) -> None:
-    exe = shutil.which("notify-send")
-    if not exe:
-        log("notify-send not found, install libnotify to get desktop notifications")
-        return
-    base = [exe, "-a", "Vinegar RPC", "-i", "software-update-available", "-t", str(NOTIFY_TIMEOUT_MS)]
+# Desktop notifications, standard library only.
+# Every Linux desktop's notification daemon (Plasma, GNOME, XFCE, dunst, ...) implements the
+# org.freedesktop.Notifications interface on the D-Bus session bus. Python has no D-Bus module,
+# so this speaks the small part of the wire protocol it needs: no notify-send / libnotify and no
+# pip packages. Spec: https://dbus.freedesktop.org/doc/dbus-specification.html
+DBUS_HANDSHAKE_TIMEOUT = 5
+_DBUS_NAME = "org.freedesktop.DBus"
+_DBUS_PATH = "/org/freedesktop/DBus"
+_NOTIFY_NAME = "org.freedesktop.Notifications"
+_NOTIFY_PATH = "/org/freedesktop/Notifications"
 
-    if open_url:
+# Message types and header field codes
+_MSG_METHOD_CALL, _MSG_METHOD_RETURN, _MSG_ERROR, _MSG_SIGNAL = 1, 2, 3, 4
+_FIELD_PATH, _FIELD_INTERFACE, _FIELD_MEMBER, _FIELD_ERROR_NAME = 1, 2, 3, 4
+_FIELD_REPLY_SERIAL, _FIELD_DESTINATION, _FIELD_SIGNATURE = 5, 6, 8
+
+class _DBusError(Exception):
+    pass
+
+# Marshalling. Values are aligned to their own size, counted from the start of the message
+# (the header is padded to 8 bytes, so the body can be built on its own starting at 0).
+def _pad(buf: bytearray, alignment: int) -> None:
+    buf.extend(b"\0" * (-len(buf) % alignment))
+
+def _put_uint32(buf: bytearray, value: int) -> None:
+    _pad(buf, 4)
+    buf += struct.pack("<I", value)
+
+def _put_string(buf: bytearray, value: str) -> None: # also used for object paths
+    raw = value.encode("utf-8")
+    _put_uint32(buf, len(raw))
+    buf += raw + b"\0"
+
+def _put_signature(buf: bytearray, value: str) -> None:
+    raw = value.encode("ascii")
+    buf.append(len(raw))
+    buf += raw + b"\0"
+
+# Arrays start with their byte length, then padding up to the element alignment (even when empty).
+def _put_array(buf: bytearray, alignment: int, put_items) -> None:
+    _put_uint32(buf, 0)
+    length_at = len(buf) - 4
+    _pad(buf, alignment)
+    start = len(buf)
+    put_items()
+    struct.pack_into("<I", buf, length_at, len(buf) - start)
+
+def _string_body(value: str) -> bytes:
+    buf = bytearray()
+    _put_string(buf, value)
+    return bytes(buf)
+
+# Body of Notify(susssasa{sv}i): app, replaces_id, icon, summary, body, actions, hints, timeout
+def _notify_body(app: str, icon: str, summary: str, body: str, actions: list[str], timeout_ms: int) -> bytes:
+    buf = bytearray()
+    _put_string(buf, app)
+    _put_uint32(buf, 0)
+    _put_string(buf, icon)
+    _put_string(buf, summary)
+    _put_string(buf, body)
+    _put_array(buf, 4, lambda: [_put_string(buf, action) for action in actions])
+    _put_array(buf, 8, lambda: None) # no hints
+    _pad(buf, 4)
+    buf += struct.pack("<i", timeout_ms)
+    return bytes(buf)
+
+def _method_call(serial: int, destination: str, path: str, interface: str, member: str,
+                 signature: str, body: bytes) -> bytes:
+    buf = bytearray(b"l" + bytes((_MSG_METHOD_CALL, 0, 1)) + struct.pack("<II", len(body), serial))
+
+    def put_fields() -> None:
+        fields = [(_FIELD_PATH, "o", path), (_FIELD_INTERFACE, "s", interface),
+                  (_FIELD_MEMBER, "s", member), (_FIELD_DESTINATION, "s", destination)]
+        if signature:
+            fields.append((_FIELD_SIGNATURE, "g", signature))
+        for code, field_signature, value in fields:
+            _pad(buf, 8)
+            buf.append(code)
+            _put_signature(buf, field_signature)
+            (_put_signature if field_signature == "g" else _put_string)(buf, value)
+
+    _put_array(buf, 8, put_fields)
+    _pad(buf, 8)
+    return bytes(buf) + body
+
+# Parsing. Replies come in the byte order of whoever sent them, hence the prefix argument.
+def _get_uint32(data: bytes, pos: int, order: str) -> tuple[int, int]:
+    pos += -pos % 4
+    return struct.unpack_from(order + "I", data, pos)[0], pos + 4
+
+def _get_string(data: bytes, pos: int, order: str) -> tuple[str, int]:
+    length, pos = _get_uint32(data, pos, order)
+    return data[pos:pos + length].decode("utf-8", "replace"), pos + length + 1
+
+def _parse_header_fields(data: bytes, order: str) -> dict[int, Union[str, int]]:
+    fields: dict[int, Union[str, int]] = {}
+    pos = 0
+    while pos < len(data):
+        pos += -pos % 8
+        code, signature_length = data[pos], data[pos + 1]
+        signature = data[pos + 2:pos + 2 + signature_length].decode("ascii")
+        pos += 2 + signature_length + 1
+        if signature in ("s", "o"):
+            fields[code], pos = _get_string(data, pos, order)
+        elif signature == "g":
+            length = data[pos]
+            fields[code] = data[pos + 1:pos + 1 + length].decode("ascii")
+            pos += length + 2
+        elif signature == "u":
+            fields[code], pos = _get_uint32(data, pos, order)
+        else:
+            raise _DBusError(f"Unsupported header field type {signature!r}")
+    return fields
+
+def _session_bus_address() -> Union[str, bytes]:
+    for candidate in os.environ.get("DBUS_SESSION_BUS_ADDRESS", "").split(";"):
+        transport, _, rest = candidate.partition(":")
+        if transport != "unix":
+            continue
+        params = {}
+        for item in rest.split(","):
+            key, _, value = item.partition("=")
+            params[key] = urllib.parse.unquote(value)
+        if "path" in params:
+            return params["path"]
+        if "abstract" in params:
+            return b"\0" + params["abstract"].encode()
+    # Variable not exported: this is where systemd and most session managers put the bus
+    return os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "bus")
+
+class _DBusConnection:
+    def __init__(self, address: Union[str, bytes], timeout: float) -> None:
+        self.deadline = time.monotonic() + timeout # every socket operation has to finish before this
+        self._serial = 0
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            # --wait blocks until the popup is clicked/closed and prints the clicked action's name.
-            # "default" is a click on the notification itself, "open" is the button (Plasma shows it).
-            result = subprocess.run(
-                base + ["--wait", "--action=default=Open", "--action=open=How to update", title, body],
-                capture_output=True, text=True, timeout=NOTIFY_TIMEOUT_MS / 1000 + 5,
-            )
-            if result.returncode == 0:
-                if result.stdout.strip() in ("default", "open"):
-                    open_in_browser(open_url)
-                return
-            # Non-zero exit: most likely libnotify older than 0.8 (no --action), try a plain popup below
-        except subprocess.TimeoutExpired:
-            return
-        except Exception as e:
-            log(f"Failed to send notification: {e}")
+            self._arm_timeout()
+            self._sock.connect(address)
+            # EXTERNAL auth: the kernel already knows who we are, we only repeat our uid (hex encoded)
+            self._send(b"\0AUTH EXTERNAL " + str(os.getuid()).encode().hex().encode() + b"\r\n")
+            reply = b""
+            while not reply.endswith(b"\r\n"):
+                reply += self._recv_exact(1)
+            if not reply.startswith(b"OK"):
+                raise _DBusError(f"D-Bus authentication refused: {reply.strip()!r}")
+            self._send(b"BEGIN\r\n")
+            self.call(_DBUS_NAME, _DBUS_PATH, _DBUS_NAME, "Hello")
+        except BaseException:
+            self._sock.close()
+            raise
 
+    def __enter__(self) -> "_DBusConnection":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self._sock.close()
+
+    def _arm_timeout(self) -> None:
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise socket.timeout("timed out")
+        self._sock.settimeout(remaining)
+
+    def _send(self, data: bytes) -> None:
+        self._arm_timeout()
+        self._sock.sendall(data)
+
+    def _recv_exact(self, size: int) -> bytes:
+        data = bytearray()
+        while len(data) < size:
+            self._arm_timeout()
+            chunk = self._sock.recv(size - len(data))
+            if not chunk:
+                raise _DBusError("D-Bus connection closed")
+            data += chunk
+        return bytes(data)
+
+    def _read_message(self) -> tuple[int, dict[int, Union[str, int]], bytes, str]:
+        fixed = self._recv_exact(16) # byte order, type, flags, version, body length, serial, fields length
+        order = "<" if fixed[0:1] == b"l" else ">"
+        body_length, _, fields_length = struct.unpack(order + "III", fixed[4:16])
+        fields = self._recv_exact(fields_length + -fields_length % 8)[:fields_length]
+        return fixed[1], _parse_header_fields(fields, order), self._recv_exact(body_length), order
+
+    # Sends a method call and returns (reply body, its byte order). Signals that arrive meanwhile
+    # (the bus sends NameAcquired right after Hello) are not interesting here.
+    def call(self, destination: str, path: str, interface: str, member: str,
+             signature: str = "", body: bytes = b"") -> tuple[bytes, str]:
+        self._serial += 1
+        self._send(_method_call(self._serial, destination, path, interface, member, signature, body))
+        while True:
+            message_type, fields, payload, order = self._read_message()
+            if message_type in (_MSG_METHOD_RETURN, _MSG_ERROR) and fields.get(_FIELD_REPLY_SERIAL) == self._serial:
+                if message_type == _MSG_ERROR:
+                    raise _DBusError(str(fields.get(_FIELD_ERROR_NAME, "unknown D-Bus error")))
+                return payload, order
+
+    # Blocks until the notification is clicked or closed, or the timeout runs out.
+    # Returns the clicked action's key, or None.
+    def wait_for_action(self, notification_id: int, timeout: float) -> Optional[str]:
+        self.deadline = time.monotonic() + timeout
+        try:
+            while True:
+                message_type, fields, payload, order = self._read_message()
+                if message_type != _MSG_SIGNAL or fields.get(_FIELD_INTERFACE) != _NOTIFY_NAME:
+                    continue
+                signal_id, pos = _get_uint32(payload, 0, order)
+                if signal_id != notification_id:
+                    continue
+                if fields.get(_FIELD_MEMBER) == "ActionInvoked":
+                    return _get_string(payload, pos, order)[0]
+                if fields.get(_FIELD_MEMBER) == "NotificationClosed":
+                    return None
+        except socket.timeout:
+            return None
+
+# Desktop notification. The script usually has no terminal, so log() alone would never be seen.
+# With open_url set, clicking the notification (or its button) opens that link.
+def send_notification(title: str, body: str, open_url: Optional[str] = None) -> None:
     try:
-        subprocess.run(base + [title, body], timeout=5, check=True, capture_output=True)
+        with _DBusConnection(_session_bus_address(), DBUS_HANDSHAKE_TIMEOUT) as bus:
+            if open_url:
+                # Subscribe before sending so a quick click can't slip past
+                bus.call(_DBUS_NAME, _DBUS_PATH, _DBUS_NAME, "AddMatch", "s",
+                         _string_body(f"type='signal',interface='{_NOTIFY_NAME}'"))
+            # "default" is a click on the popup itself, "open" is the button (Plasma shows it).
+            # Daemons without action support just ignore them and show a plain popup.
+            actions = ["default", "Open", "open", "How to update"] if open_url else []
+            reply, order = bus.call(
+                _NOTIFY_NAME, _NOTIFY_PATH, _NOTIFY_NAME, "Notify", "susssasa{sv}i",
+                _notify_body("Vinegar RPC", "software-update-available", title, body, actions, NOTIFY_TIMEOUT_MS),
+            )
+            if open_url:
+                notification_id = _get_uint32(reply, 0, order)[0]
+                if bus.wait_for_action(notification_id, NOTIFY_TIMEOUT_MS / 1000 + 5) in ("default", "open"):
+                    open_in_browser(open_url)
     except Exception as e:
         log(f"Failed to send notification: {e}")
 
