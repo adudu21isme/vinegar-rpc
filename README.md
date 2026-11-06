@@ -98,7 +98,7 @@ and set **Program** to the location of `launch_studio.sh`.
 When you start Studio, the script checks GitHub for a newer release. If there is one, a desktop notification shows up, clicking it brings you here.
 
 > [!NOTE]
-> The popup needs `notify-send` (`libnotify` package), without it nothing is shown and the script only logs it. You can turn the check off with `--no-update-check`.
+> The popup is sent over D-Bus using only Python's standard library, so there is nothing extra to install. It works with any desktop that runs a notification daemon (KDE Plasma, GNOME, XFCE, dunst, ...). Clicking it opens this page on daemons that support notification actions (Plasma does), otherwise it is a plain popup. If no daemon is running, nothing is shown and the script only logs it. You can turn the check off with `--no-update-check`.
 
 1. Ensure all Roblox Studio instances are completely closed (this also stops the old script).
 2. Download the new [RPC.py](src/RPC.py) and replace your old one, same location (`~/Documents/RPC.py` if you followed this guide).
