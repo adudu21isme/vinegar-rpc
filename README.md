@@ -20,7 +20,7 @@ Example video of this script (click to watch):
 
 ## How to install?
 > [!NOTE]
-> This assumes you have Python 3+ installed and are using KDE Plasma and that vinegar is intalled via Flatpak
+> This assumes you have Python 3.14.8+ installed and are using KDE Plasma and that vinegar is intalled via Flatpak
 1. In KDE Plasma, right-click the application menu button on the taskbar, select **Edit Applications**, then search for **Vinegar**.
 > [!TIP]
 > You can also right-click **Vinegar** in the application menu and select **Edit Application**.
